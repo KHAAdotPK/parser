@@ -8,5 +8,6 @@ Usage
 To use this Parser class in your project, simply include the parser.h header file and create a class that inherits from Parser. You can then implement the pure virtual functions defined in the Parser class to provide custom parsing functionality.
 
 ### License
-This project is licensed under a license, the copy of which can be found in file - see the file named LICENSE for details.
+This project is governed by a license, the details of which can be located in the accompanying file named 'LICENSE.' Please refer to this file for comprehensive information.
+
 

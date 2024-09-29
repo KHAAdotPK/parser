@@ -1,6 +1,6 @@
 /* 
    parser/parser.hh
-   Written by, Q@khaa.pk
+   Q@khaa.pk
  */
 
 /* A general purpose parser interface */

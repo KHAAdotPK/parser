@@ -29,6 +29,12 @@ The following methods are part of the public interface and must be implemented b
 - `T get_token_by_number(typename cc_tokenizer::string_character_traits<E>::int_type)`: Returns the token by its number.
 - `typename cc_tokenizer::string_character_traits<E>::int_type get_current_token_number()`: Returns the current token number.
 
+##### Sequence-based Method
+typename cc_tokenizer::string_character_traits<E>::size_type max_sequence_length(): Determines the maximum number of tokens found in a single batch within the input data/corpus.
+
+This function scans through the input data, treating it as a sequence of batches, where each batch is terminated by a batch-ending marker, and each token/sequence is delimited by a token-ending marker. It calculates the number of tokens per line and returns the maximum count found in any single batch.
+
+
 Dependencies
 The Parser class has a single dependency: the string library, which can be found at https://github.com/KHAAdotPK/string.git
 

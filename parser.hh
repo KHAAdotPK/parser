@@ -24,6 +24,9 @@
 #ifndef		CC_TOKENIZER_PARSER_HH
 #define		CC_TOKENIZER_PARSER_HH
 
+#define TOKENIZER_PARSER_LINE_NUMBER_ORIGINATES_AT_INDEX 1
+#define TOKENIZER_PARSER_TOKEN_NUMBER_ORIGINATES_AT_INDEX 1
+
 namespace cc_tokenizer 
 {
     template<class T, typename E>

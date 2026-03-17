@@ -5,7 +5,7 @@
 
 /* A general purpose parser interface */
 
-#include "../string/src/String.hh"
+#include "../String/src/String.hh"
 
 /*
     The public interface should be as such that methods like... 

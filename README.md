@@ -1,57 +1,123 @@
-### General Purpose Parser Interface
-This C++ project defines an abstract template class `parser` within the `cc_tokenizer` namespace. The purpose of this interface is to provide a generic way to parse data as lines and tokens, where the exact definitions of lines and tokens are left to the implementer.
+# Parser
 
-The parser interface is designed to be flexible and generic, allowing the handling of various types of content. It treats content as a series of lines, where each line is further divided into tokens based on a delimiter. The interface is fully abstract, meaning that any class implementing this interface will need to define the behavior for managing lines and tokens.
+A lightweight C++ library for streaming CSV corpora and building an in-memory vocabulary index for NLP preprocessing tasks.
 
-#### Template Parameters
-- `T`: Represents the type of data that is returned by the `get_line` and `get_token` methods. This could be a string, or any other type that represents a line or a token.
-- `E`: The character type used for string processing, e.g., `char` or `wchar_t`.
+---
 
-#### Namespaces and Traits
-The parser uses the `cc_tokenizer::string_character_traits` class to manage the character types (`E`) and their associated traits, such as integer types for indexing.
+## Overview
 
-#### Public Interface
+`Parser` reads a delimited text file line by line and constructs a hash table of every unique token encountered, each mapped to a linked list of every position where it appears in the corpus. The result is a `TABLES` structure that downstream NLP code can use for concordance lookup, co-occurrence analysis, frequency counting, and vocabulary enumeration — without loading the entire corpus into memory at once.
 
-The following methods are part of the public interface and must be implemented by any derived class:
+---
 
-##### Line-based Methods
-- `T get_current_line()`: Returns the content of the current line.
-- `T get_line_by_number(typename cc_tokenizer::string_character_traits<E>::int_type)`: Returns the content of the line by its number.
-- `typename cc_tokenizer::string_character_traits<E>::int_type get_total_number_of_lines()`: Returns the total number of lines.
-- `typename cc_tokenizer::string_character_traits<E>::int_type go_to_next_line()`: Moves to the next line and returns the line number.
-- `typename cc_tokenizer::string_character_traits<E>::int_type get_current_line_number()`: Returns the current line number.
-- `typename cc_tokenizer::string_character_traits<E>::int_type remove_line_by_number(typename cc_tokenizer::string_character_traits<E>::int_type)`: Removes a line by its number.
+## Architecture
 
-##### Token-based Methods
-- `typename cc_tokenizer::string_character_traits<E>::int_type go_to_next_token()`: Moves to the next token and returns the token number.
-- `T get_current_token()`: Returns the current token.
-- `typename cc_tokenizer::string_character_traits<E>::int_type get_total_number_of_tokens()`: Returns the total number of tokens.
-- `T get_token_by_number(typename cc_tokenizer::string_character_traits<E>::int_type)`: Returns the token by its number.
-- `typename cc_tokenizer::string_character_traits<E>::int_type get_current_token_number()`: Returns the current token number.
+The library is built around three cooperating components.
 
-##### Sequence-based Method
-typename cc_tokenizer::string_character_traits<E>::size_type max_sequence_length(): Determines the maximum number of tokens found in a single batch within the input data/corpus.
+### `Iterator` — Streaming CSV Tokeniser
 
-This function scans through the input data, treating it as a sequence of batches, where each batch is terminated by a batch-ending marker, and each token/sequence is delimited by a token-ending marker. It calculates the number of tokens per line and returns the maximum count found in any single batch.
+A standard-conforming C++ input iterator (`std::input_iterator_tag`) that wraps a `std::ifstream` and yields one line at a time as a `std::vector<std::string>` of token fields. It splits on `CSV_PARSER_TOKEN_DELIMITER` (configurable at compile time) and is compatible with range-for loops.
 
+Optional compile-time behaviour is gated behind macros:
 
-Dependencies
-The Parser class has a single dependency: the string library, which can be found at https://github.com/KHAAdotPK/string.git
+- `ITERATOR_USER_DEFINED_CLEANER_CODE` — plugs in a `Cleaner` object to normalise each line (strip punctuation, collapse whitespace) before tokenisation.
+- `ITERATOR_GUARD_AGAINST_EMPTY_STRING` — skips empty fields produced by adjacent delimiters.
 
-#### Usage
-This class is a pure virtual interface (abstract class), so it cannot be instantiated directly. To use this parser, you need to create a derived class that implements all the virtual methods defined above.
+### `Parser` — Corpus Reader and Index Builder
 
-Here’s an example of how you might extend this parser:
+Owns the file stream and exposes `begin()`/`end()` so it can be iterated directly. Its primary method is:
 
 ```cpp
-#include "parser.hh"
-
-class MyParser : public cc_tokenizer::parser<std::string, char> {
-    // Implement the virtual methods here
-};
+TABLES* build_hash_table();
 ```
 
-### License
-This project is governed by a license, the details of which can be located in the accompanying file named 'LICENSE.' Please refer to this file for comprehensive information.
+This drives the iterator across the entire corpus and populates the vocabulary index. After building, the file is rewound so the parser can be iterated again if needed.
 
+`Parser` is non-copyable (file stream semantics) but move-constructible.
+
+### `WordRecord` / `OccurrenceNode` / `TABLES` — Vocabulary Index
+
+```
+TABLES
+├── hash_to_word_record[]   (hash table: bucket → WordRecord*)
+└── word_id_to_hash[]       (index table: word_id → current bucket key)
+
+WordRecord
+├── word_id                 (unique integer, assigned in order of first encounter)
+├── word                    (the token string)
+└── head → OccurrenceNode ⇄ OccurrenceNode ⇄ ...
+              (doubly-linked list of every position in the corpus)
+
+OccurrenceNode
+├── line                    (line number of this occurrence)
+├── token                   (token position within the line, resets per line)
+├── next
+└── prev
+```
+
+`TABLES` carries a `ref_count` for shared-ownership tracking by the caller. It is allocated on the heap by `build_hash_table()` and ownership transfers to the caller.
+
+---
+
+## Hash Table Design
+
+The hash table uses **open addressing with a prime bucket count**, starting at 1009 (`KEYS_COMMON_STARTING_SIZE`). The hashing function is provided by `Keys::generate_key(word, bucket_count)`.
+
+When the load factor exceeds `KEYS_LOAD_FACTOR_THRESHOLD`, the table is grown to the next prime (via `Keys::next_prime`) and all existing entries are rehashed into the larger table. The `word_id_to_hash` index is updated in the same pass — keyed by `word_id` — so the index remains consistent after every resize.
+
+Each `word_id` is assigned sequentially in order of first encounter (0, 1, 2, ...), independent of hash key or token position. Each `OccurrenceNode` records the intra-line token position (`token`) and line number (`line`) of that specific occurrence, with `token` resetting to 0 at the start of each new line.
+
+> **Known limitation:** collision handling is not yet implemented. Two distinct words that hash to the same bucket will cause the second to silently overwrite the first. For controlled or small vocabularies this is unlikely to occur; for large open-ended corpora, linear probing or bucket chaining should be added.
+
+---
+
+## Build Configuration
+
+| Macro | Effect |
+|---|---|
+| `CSV_PARSER_TOKEN_DELIMITER` | Field separator character (e.g. `','`) |
+| `KEYS_COMMON_STARTING_SIZE` | Initial bucket count (recommended: prime, e.g. `1009`) |
+| `KEYS_LOAD_FACTOR_THRESHOLD` | Rehash trigger ratio (e.g. `0.7`) |
+| `ITERATOR_USER_DEFINED_CLEANER_CODE` | Enable line-cleaning via a `Cleaner` class |
+| `ITERATOR_GUARD_AGAINST_EMPTY_STRING` | Skip empty token fields |
+
+---
+
+## Usage
+
+```cpp
+#include "lib/src/WordRecord.hh"
+#include "lib/src/Iterator.hh"
+#include "lib/src/Parser.hh"
+
+Parser parser("corpus.csv");
+
+if (!parser.is_open())
+{
+    // handle error
+}
+
+TABLES* tables = parser.build_hash_table();
+
+// tables->hash_to_word_record  — look up a word by its hash key
+// tables->word_id_to_hash      — look up a word's current bucket by word_id
+// tables->bucket_used          — vocabulary size (number of unique tokens)
+
+// Caller is responsible for deallocating tables and its contents
+```
+
+---
+
+## Known Issues and Roadmap
+
+- [ ] Collision handling — add linear probing or chaining to eliminate silent data loss on hash collision
+- [ ] `TABLES` destructor — no recursive deallocation of `WordRecord` objects and `OccurrenceNode` chains; caller must walk the table to free memory
+- [ ] `ref_count` enforcement — manual reference counting on `TABLES` is not encapsulated; consider wrapping in `std::shared_ptr` or adding `acquire`/`release` methods
+- [ ] Remove dead commented-out member variables from `Parser` class body
+
+---
+
+## License
+
+This project is governed by a license, the details of which can be located in the accompanying file named 'LICENSE.' Please refer to this file for comprehensive information.
 

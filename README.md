@@ -10,6 +10,57 @@ A lightweight C++ library for streaming CSV corpora and building an in-memory vo
 
 ---
 
+## Intended Use
+
+`Parser` is **not meant to be used as a standalone application**. It is a dependency library, designed to be consumed by higher-level NLP packages. A good example of such a package is [naqsh](https://github.com/KHAAdotPK/naqsh), which uses `Parser` to build its vocabulary index during corpus preprocessing.
+
+If you are building a package that needs corpus tokenisation and vocabulary indexing, `Parser` (along with its own dependency [Hash](https://github.com/KHAAdotPK/Hash)) should be cloned into the `lib/` directory of your package — not installed system-wide or used directly.
+
+---
+
+## Dependencies
+
+`Parser` has one dependency:
+
+- **[Hash](https://github.com/KHAAdotPK/Hash)** — provides `Keys::generate_key()` and `Keys::next_prime()`, which drive the hash function and rehash growth strategy used by `build_hash_table()`.
+
+Both `Parser` and `Hash` must be present under the `lib/` directory of whichever package depends on them.
+
+---
+
+## Installation (as a dependency)
+
+Clone both `Parser` and `Hash` into the `lib/` directory of your dependent package. Using [naqsh](https://github.com/KHAAdotPK/naqsh) as an example:
+
+```bash
+cd naqsh/lib
+
+git clone https://github.com/KHAAdotPK/Parser.git
+git clone https://github.com/KHAAdotPK/Hash.git
+```
+
+Then include the entry point header from your package code:
+
+```cpp
+#include "lib/Parser/header.hh"
+```
+
+The expected layout inside your package's `lib/` directory is:
+
+```
+lib/
+├── Parser/
+│   ├── header.hh
+│   └── src/
+│       ├── WordRecord.hh
+│       ├── Iterator.hh
+│       └── Parser.hh
+└── Hash/
+    └── ...
+```
+
+---
+
 ## Architecture
 
 The library is built around three cooperating components.
@@ -86,9 +137,7 @@ Each `word_id` is assigned sequentially in order of first encounter (0, 1, 2, ..
 ## Usage
 
 ```cpp
-#include "lib/src/WordRecord.hh"
-#include "lib/src/Iterator.hh"
-#include "lib/src/Parser.hh"
+#include "lib/parser/header.hh"
 
 Parser parser("corpus.csv");
 
@@ -120,4 +169,3 @@ TABLES* tables = parser.build_hash_table();
 ## License
 
 This project is governed by a license, the details of which can be located in the accompanying file named 'LICENSE.' Please refer to this file for comprehensive information.
-

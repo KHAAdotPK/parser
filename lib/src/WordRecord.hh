@@ -14,12 +14,17 @@ struct WordRecord
     std::string word;       // the word itself
     OccurrenceNode* head;   // points to first occurrence in corpus
 
-    WordRecord(size_t word_id, std::string word, OccurrenceNode* head)
+    WordRecord(size_t _word_id, std::string _word, OccurrenceNode* _head) : word_id(_word_id), word(_word), head(_head)
     {
-        this->word_id = word_id;
+        /* this->word_id = word_id;
         this->word = word;
-        this->head = head;
+        this->head = head; */
     }
+
+    // Copy constructor - needed for vector<WordRecord>
+    WordRecord(const WordRecord&) = default;
+    // Assignment operator - needed for vector<WordRecord>
+    WordRecord& operator=(const WordRecord&) = default;
 };
 
 // Each occurrence
@@ -31,13 +36,18 @@ struct OccurrenceNode
     OccurrenceNode* next;   // pointer to next occurrence
     OccurrenceNode* prev;   // pointer to previous occurrence
 
-    OccurrenceNode(size_t line, size_t token, OccurrenceNode* next, OccurrenceNode* prev)
+    OccurrenceNode(size_t _line, size_t _token, OccurrenceNode* _next, OccurrenceNode* _prev) : line(_line), token(_token), next(_next), prev(_prev)
     {
-        this->line = line;
+        /*this->line = line;
         this->token = token;
         this->next = next;
-        this->prev = prev;
+        this->prev = prev; */
     }
+
+    // Copy constructor - needed for vector<OccurrenceNode>
+    OccurrenceNode(const OccurrenceNode&) = default;
+    // Assignment operator - needed for vector<OccurrenceNode>
+    OccurrenceNode& operator=(const OccurrenceNode&) = default;
 };
 
 struct Tables 

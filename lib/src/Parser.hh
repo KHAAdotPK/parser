@@ -50,12 +50,12 @@ class Parser
     public:
 
         // Constructors
-        Parser() : _is_open(false) /*,bucket_count(size_t(KEYS_COMMON_STARTING_SIZE)), buckets_used(0),*/ /*hash_table(nullptr), index_table(nullptr), line_number(0), token_number(0)*/   
+        Parser() : _file_name(), _file(), _is_open(false)  /*,bucket_count(size_t(KEYS_COMMON_STARTING_SIZE)), buckets_used(0),*/ /*hash_table(nullptr), index_table(nullptr), line_number(0), token_number(0)*/   
         {
 
         }
 
-        explicit Parser(const std::string& name) : _file_name(name), _is_open(false)/*, bucket_count(size_t(KEYS_COMMON_STARTING_SIZE)), buckets_used(0),*/ /*hash_table(nullptr), index_table(nullptr), line_number(0), token_number(0)*/
+        explicit Parser(const std::string& name) : _file_name(name), _file(), _is_open(false)/*, bucket_count(size_t(KEYS_COMMON_STARTING_SIZE)), buckets_used(0),*/ /*hash_table(nullptr), index_table(nullptr), line_number(0), token_number(0)*/
         {
             _file.open(_file_name);
 

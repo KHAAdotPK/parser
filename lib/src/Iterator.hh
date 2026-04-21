@@ -16,10 +16,10 @@ class Iterator
         using reference         = value_type&;
 
         // End iterator constructor
-        Iterator() : _stream(nullptr), _at_end(true) {}
+        Iterator() : _stream(nullptr), _current{}, _at_end(true) {}
 
         // Begin iterator constructor
-        explicit Iterator(std::ifstream* stream) : _stream(stream), _at_end(false)
+        explicit Iterator(std::ifstream* stream) : _stream(stream), _current{}, _at_end(false)
         {
             if (_stream && _stream->is_open() && !_stream->eof())
             {
@@ -30,6 +30,9 @@ class Iterator
                 _at_end = true;
             }
         }
+
+        Iterator(const Iterator&) = default;
+        Iterator& operator=(const Iterator&) = default;
 
         // Dereference
         reference operator*()
@@ -106,8 +109,12 @@ class Iterator
                 std::stringstream ss(line);
                 std::string field;
                 
-                // Simple CSV split on comma (no quote handling)
+                // Simple CSV split on comma(default) or user defined delimiter(via macro)
+#ifdef CSV_PARSER_TOKEN_DELIMITER
                 while (std::getline(ss, field, CSV_PARSER_TOKEN_DELIMITER))
+#else
+                while (std::getline(ss, field, ','))
+#endif                
                 {
 #ifdef ITERATOR_GUARD_AGAINST_EMPTY_STRING                    
                     // Guard against empty string.

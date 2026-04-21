@@ -7,8 +7,8 @@
 #define CSV_PARSER_LIB_PARSER_HEADER_HH
 
 // Source Files
-#include "../src/WordRecord.hh"
-#include "../src/Iterator.hh"
-#include "../src/Parser.hh"
+#include "lib/src/WordRecord.hh"
+#include "lib/src/Iterator.hh"
+#include "lib/src/Parser.hh"
 
 #endif // CSV_PARSER_LIB_PARSER_HEADER_HH

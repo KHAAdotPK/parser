@@ -1,0 +1,319 @@
+        /*
+            Build Hash Table
+            ----------------
+            Iterates through the corpus and builds a hash table of unique tokens.
+            Each unique token is assigned a unique token_number and stored in the hash table.
+            The hash table is implemented as an array of pointers to WordRecord.
+            The index_table stores the hash key for each token_number.
+        */
+        TABLES* build_hash_table_old(void)
+        {
+            size_t bucket_count = KEYS_COMMON_STARTING_SIZE;
+            size_t bucket_used = 0;
+
+            WordRecord** hash_table = nullptr;
+            size_t* index_table = nullptr; 
+            size_t line_number = 0;
+            size_t token_number = 0;
+
+            size_t mxntpl = 0, mnntpl = std::numeric_limits<size_t>::max();; // Maximum and Minimum number of tokens in a largest and smallest line
+            
+            try
+            {
+                hash_table = new WordRecord*[bucket_count](); // Create array of pointers to WordRecord and return address of first element of the array
+                index_table = new size_t[bucket_count](); // Create array of hashed keys (size_t) and return address of first element of the array
+                /*
+                 * The () at the end is critical — it zero-initialises every pointer to nullptr.
+                 * Without it, all bucket pointers are uninitialised garbage, and your
+                 * (hash_table[key] == nullptr) check for unique words becomes undefined behaviour.
+                 */
+            }
+            catch (const std::bad_alloc& e)
+            {
+                // Corpus can be large. This is a real possibility, not a formality.             
+                throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+            }
+            
+            for (auto& line : *this)
+            {               
+                for (auto& token : line)
+                {                     
+                    size_t key = Keys::generate_key(token, bucket_count);
+
+                    OccurrenceNode* occurrence = nullptr;
+                    WordRecord* word_record = nullptr;
+
+                    if (hash_table[key] == nullptr) // If the bucket is empty, it means the token/word is new
+                    {
+
+                        std::cout<< "New bucket  created for " << token << " at line " << line_number << " and token " << token_number << std::endl; 
+
+                        try
+                        {
+                            occurrence = new OccurrenceNode(line_number, token_number, nullptr, nullptr);
+                            word_record = new WordRecord(/*token_number*/ bucket_used, token, occurrence);
+                            hash_table[key] = word_record;
+                            index_table[/*token_number*/ word_record->word_id] = key;
+                        }
+                        catch (const std::bad_alloc& e)
+                        {   
+                            // Clean up allocated memory before throwing
+                            if (occurrence != nullptr)
+                            {
+                                delete occurrence;
+                            }
+                            if (word_record != nullptr)
+                            {
+                                delete word_record;
+                            }
+                            throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+                        }
+                        
+                        bucket_used++; // Increment the number of buckets used
+                        //token_number++; // Increment the token number, it does not count the redundency of the tokens/words on the corpus
+                    }
+                    else // If the bucket is not empty, it means the token/word is already present
+                         // No check of the hash collision is done here, becuasse we are setting a threshold for the load factor.
+                         // Note: The load factor only reduces collision probability, it does not eliminate it. 
+                         // At any load factor, two different words can still hash to the same bucket. This is a data-loss bug, not a probability question.
+                         //
+                         // But even then if collision did not happen when the token/word was first inserted, it will not happen later either.
+                         // Given that now the memory size is increased as well, the probability of collision is further reduced.
+                    {
+                        std::cout<< "Existing bucket re-used for " << token << " at line " << line_number << " and token " << token_number << std::endl; 
+
+                        word_record = hash_table[key]; // Get the word record
+                        if (word_record->word != token)
+                        {                            
+                        } 
+
+                        // Different word, same bucket = hash collision
+                        // COLLISION CHECK — is this actually the same word?
+                        // It is a collision, but we need to check if the word is the same as the word in the bucket
+                        // A collision resolution strategy here
+                        // Simplest: linear probe to find the next free or matching slot
+                        if(hash_table[key]->word != token)
+                        {
+                            //std::cout<< "Collision happened for " << token << " at line " << line_number << " and token " << token_number << " hash key " << key << " " << hash_table[key]->word << std::endl;   
+
+                            size_t probe = (key + 1) % bucket_count;
+                            while (probe != key)
+                            {
+                                if (hash_table[probe] == nullptr)
+                                {
+                                    // Found empty slot — treat as new word
+                                    // (fall through to your "new bucket" logic)
+                                    // ... insert word_record here ...
+                                    try 
+                                    { 
+                                        occurrence = new OccurrenceNode(line_number, token_number, nullptr, nullptr);
+                                        word_record = new WordRecord(/*token_number*/ bucket_used, token, occurrence);
+                                        hash_table[probe] = word_record;
+                                        index_table[/*token_number*/ word_record->word_id] = key;
+                                    }
+                                    catch (const std::bad_alloc& e)
+                                    {
+                                        // Clean up allocated memory before throwing
+                                        if (occurrence != nullptr)
+                                        {
+                                            delete occurrence;
+                                        }
+                                        if (word_record != nullptr)
+                                        {
+                                            delete word_record;
+                                        }
+                                        throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+                                    }                                    
+                                    
+                                    bucket_used++;
+                                    break;
+                                }
+                                else if (hash_table[probe]->word == token)
+                                {
+                                    // Found the actual matching word
+                                    word_record = hash_table[probe];
+
+                                    occurrence = word_record->head; // Get the head of the linked list
+                                    while (occurrence->next != nullptr) // Traverse to the end of the linked list
+                                    {                             
+                                        occurrence = occurrence->next;
+                                    }
+                                    try
+                                    { 
+                                        // Create a new occurrence node and append it to the end of the linked list which has all occurrences of this token/word in whole of the corpus
+                                        occurrence->next = new OccurrenceNode(line_number, token_number, nullptr, occurrence);
+                                    }
+                                    catch (const std::bad_alloc& e)
+                                    { 
+                                        throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+                                    }     
+
+                                    break;
+                                }
+                                probe = (probe + 1) % bucket_count;
+                            }
+                        }
+
+                        // It is not possible that head ever can be null here
+                        occurrence = word_record->head; // Get the head of the linked list
+                        while (occurrence->next != nullptr) // Traverse to the end of the linked list
+                        {                             
+                            occurrence = occurrence->next;
+                        }
+                        try
+                        { 
+                            // Create a new occurrence node and append it to the end of the linked list which has all occurrences of this token/word in whole of the corpus
+                            occurrence->next = new OccurrenceNode(line_number, token_number, nullptr, occurrence);
+                        }
+                        catch (const std::bad_alloc& e)
+                        { 
+                            throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+                        }                        
+                    }
+
+                    /*
+                        Check if the hash table needs to be rehashed
+                        Note: Integer division would truncate the result, so we cast to double
+                    */
+                    if ((static_cast<double>(bucket_used) / static_cast<double>(bucket_count)) > KEYS_LOAD_FACTOR_THRESHOLD)
+                    {
+
+                        //std::cout << "Rehashing..." << std::endl;
+
+                        /*
+                            Rehash all existing entries into new table
+                            Do NOT reset buckets_used, carry the real count forward
+                        */
+                        size_t old_bucket_count = bucket_count;
+                        bucket_count = Keys::next_prime(bucket_count);
+
+                        //std::cout<< "Previous bucket count: " << old_bucket_count << std::endl;
+                        //std::cout<< "New bucket count: " << bucket_count << std::endl;
+
+                        WordRecord** new_hash_table = nullptr;
+                        size_t* new_index_table = nullptr;
+
+                        try
+                        {
+                            new_hash_table = new WordRecord*[bucket_count]();
+                            new_index_table = new size_t[bucket_count]();
+                        }
+                        catch (const std::bad_alloc& e)
+                        {
+                            // Clean up allocated memory before throwing
+                            if (new_hash_table != nullptr)
+                            {
+                                delete[] new_hash_table;
+                            }
+                            if (new_index_table != nullptr)
+                            {
+                                delete[] new_index_table;
+                            }
+                            throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+                        }
+
+                        /*
+                            hash_table and index_table are rehashed here
+                            Both has same size determined by bucket_count
+                            Both are rehashed here because bucket_count is increased
+                         */
+                        for (size_t i = 0; i < old_bucket_count; i++)
+                        {
+                            if (hash_table[i] != nullptr)
+                            {
+                                /*
+                                    No check of the hash collision is done here, becuasse we are setting a threshold for the load factor.
+                                    Note: The load factor only reduces collision probability, it does not eliminate it. 
+                                    At any load factor, two different words can still hash to the same bucket. This is a data-loss bug, not a probability question.
+
+                                    But even then if collision did not happen when the token/word was first inserted, it will not happen later either.
+                                    Given that now the memory size is increased as well, the probability of collision is further reduced.
+                                 */
+                                /*
+                                    Empty String Check
+                                    -------------------
+                                    The word can be an empty string, which is not a valid word for the hash table
+                                    But this check should not be made here.
+                                    Instead this check should be made when the word is first inserted into the hash table.                                                                                                            
+                                 */ 
+                                size_t new_key = Keys::generate_key(hash_table[i]->word, bucket_count);
+                                new_hash_table[new_key] = hash_table[i];
+
+                                new_index_table[hash_table[i]->word_id] = new_key;
+                            }
+
+                            //new_index_table[i] = index_table[i];
+                        }
+
+                        delete[] hash_table;
+                        delete[] index_table;
+
+                        hash_table = new_hash_table;
+                        index_table = new_index_table;
+                    }
+
+                    token_number++; // Increment the token number, these are tokens in this line, it does not count the redundency of the tokens/words on the corpus                    
+                }
+
+                if (token_number > mxntpl)
+                {
+                    mxntpl = token_number;
+                }
+
+                if (token_number < mnntpl)
+                {
+                    mnntpl = token_number;
+                }
+
+                token_number = 0; // Reset the token number for the next line
+                line_number++;                
+            }
+            
+            /*
+                Reset the line number, token number, number of buckets used, and bucket count
+                This is done so that the hash table can be used again
+
+                These should be made into local variables instead of member variables
+            */
+            line_number = 0; // Reset the line number
+            token_number = 0; // Reset the token number
+            //bucket_used = 0; // Reset the number of buckets used. This is mportant fo the TABLE composite
+            //bucket_count = size_t(KEYS_COMMON_STARTING_SIZE); // Reset the bucket count
+
+            if (is_open())
+            {
+                _file.clear();
+                _file.seekg(0);
+            }
+
+            TABLES* tables = nullptr;
+
+            try
+            {
+                tables = new TABLES();
+
+                tables->hash_to_word_record = hash_table;
+                tables->word_id_to_hash = index_table;
+
+                tables->bucket_count = bucket_count;
+                tables->bucket_used = bucket_used;
+
+                tables->ref_count = 1;
+
+                tables->maximum_tokens_per_line = mxntpl;
+                tables->minimum_tokens_per_line = mnntpl;
+
+                /*
+                 * The () at the end is critical — it zero-initialises every pointer to nullptr.
+                 * Without it, all bucket pointers are uninitialised garbage, and your
+                 * (hash_table[key] == nullptr) check for unique words becomes undefined behaviour.
+                 */
+            }
+            catch (const std::bad_alloc& e)
+            {
+                // Corpus can be large. This is a real possibility, not a formality.             
+                throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+            }
+
+            return tables;
+        }        

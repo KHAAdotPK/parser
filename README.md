@@ -108,17 +108,19 @@ OccurrenceNode
 
 `TABLES` carries a `ref_count` for shared-ownership tracking by the caller. It is allocated on the heap by `build_hash_table()` and ownership transfers to the caller.
 
+For a full explanation of how these structures are built, how the bidirectional lookup works, all invariants, and the connection to the downstream Transformer embedding matrix, see **[TABLES.md](TABLES.md)**.
+
 ---
 
 ## Hash Table Design
 
-The hash table uses **open addressing with a prime bucket count**, starting at 1009 (`KEYS_COMMON_STARTING_SIZE`). The hashing function is provided by `Keys::generate_key(word, bucket_count)`.
+The hash table uses **open addressing with linear probing and a prime bucket count**, starting at `KEYS_COMMON_STARTING_SIZE`. The hashing function is provided by `Keys::generate_key(word, bucket_count)`.
 
-When the load factor exceeds `KEYS_LOAD_FACTOR_THRESHOLD`, the table is grown to the next prime (via `Keys::next_prime`) and all existing entries are rehashed into the larger table. The `word_id_to_hash` index is updated in the same pass — keyed by `word_id` — so the index remains consistent after every resize.
+**Collision resolution** is handled by linear probing. When two distinct words hash to the same bucket, the incoming word is walked forward — `probe = (key + 1) % bucket_count` — until either an empty slot is found (new word) or a slot containing the same word is found (existing word, append occurrence). The `word_id_to_hash` index always stores the actual probe position at which a word was placed, not its natural hash key, so bidirectional lookup remains correct for displaced words.
 
-Each `word_id` is assigned sequentially in order of first encounter (0, 1, 2, ...), independent of hash key or token position. Each `OccurrenceNode` records the intra-line token position (`token`) and line number (`line`) of that specific occurrence, with `token` resetting to 0 at the start of each new line.
+When the load factor exceeds `KEYS_LOAD_FACTOR_THRESHOLD`, the table is grown to the next prime (via `Keys::next_prime`) and all existing entries are rehashed into the larger table using the same linear probing strategy. The `word_id_to_hash` index is updated in the same pass so the index remains consistent after every resize. Only the bucket arrays are reallocated — `WordRecord` and `OccurrenceNode` objects on the heap are never touched during rehash, and all occurrence linked lists survive intact.
 
-> **Known limitation:** collision handling is not yet implemented. Two distinct words that hash to the same bucket will cause the second to silently overwrite the first. For controlled or small vocabularies this is unlikely to occur; for large open-ended corpora, linear probing or bucket chaining should be added.
+Each `word_id` is assigned sequentially in order of first encounter (0, 1, 2, ...), independent of hash key or token position. This makes `word_id` a stable, dense row index directly usable as an index into a Transformer embedding matrix. Each `OccurrenceNode` records the intra-line token position (`token`) and line number (`line`) of that specific occurrence, with `token` resetting to 0 at the start of each new line.
 
 ---
 
@@ -159,7 +161,7 @@ TABLES* tables = parser.build_hash_table();
 
 ## Known Issues and Roadmap
 
-- [ ] Collision handling — add linear probing or chaining to eliminate silent data loss on hash collision
+- [x] ~~Collision handling — add linear probing or chaining to eliminate silent data loss on hash collision~~ — **Implemented.** Full linear probing is in place for both insertion and rehashing. Word-string comparison guards every lookup so displaced words are always found correctly and never silently overwritten.
 - [ ] `TABLES` destructor — no recursive deallocation of `WordRecord` objects and `OccurrenceNode` chains; caller must walk the table to free memory
 - [ ] `ref_count` enforcement — manual reference counting on `TABLES` is not encapsulated; consider wrapping in `std::shared_ptr` or adding `acquire`/`release` methods
 - [ ] Remove dead commented-out member variables from `Parser` class body

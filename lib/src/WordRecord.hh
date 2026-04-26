@@ -93,6 +93,20 @@ struct Tables
      */
     size_t ref_count;
 
+    /*
+        Maximum Tokens Per Line
+        -----------------------
+        This is the size of largest line in number of tokens
+    */
+    size_t maximum_tokens_per_line; 
+    
+    /*
+        Minimum Tokens Per Line
+        -----------------------
+        This is the size of smallest line in number of tokens
+    */  
+    size_t minimum_tokens_per_line;
+
     size_t get_bucket_count(void) const
     {
         return bucket_count;
@@ -101,7 +115,17 @@ struct Tables
     size_t get_bucket_used(void) const
     {
         return bucket_used;
-    }    
+    }
+    
+    size_t get_maximum_tokens_per_line(void) const
+    {
+        return maximum_tokens_per_line;
+    }
+    
+    size_t get_minimum_tokens_per_line(void) const
+    {
+        return minimum_tokens_per_line;
+    }   
 };
 
 typedef struct Tables TABLES;

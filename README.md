@@ -108,7 +108,7 @@ OccurrenceNode
 
 `TABLES` carries a `ref_count` for shared-ownership tracking by the caller. It is allocated on the heap by `build_hash_table()` and ownership transfers to the caller.
 
-For a full explanation of how these structures are built, how the bidirectional lookup works, all invariants, and the connection to the downstream Transformer embedding matrix, see **[TABLES.md](TABLES.md)**.
+For a full explanation of how these structures are built, how the bidirectional lookup works, all invariants, and the connection to the downstream Transformer embedding matrix, see **[TABLES.md](./DOCUMENTS/TABLES.md)**.
 
 ---
 

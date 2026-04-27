@@ -538,10 +538,46 @@ class Parser
                                 }
                                 else
                                 {
-                                    
-                                    // Collision with the same key
+                                    /*
+                                        Rehash Collision — Linear Probe with Infinite-Loop Guard
+                                        ─────────────────────────────────────────────────────────
+                                        During rehash, two words that lived in different buckets in the
+                                        old table can collide in the new table because the new bucket count
+                                        is different.  We resolve this with the same linear probing strategy
+                                        used during normal insertion: walk forward from new_key until an
+                                        empty slot is found.
+
+                                        Infinite-Loop Risk
+                                        ──────────────────
+                                        The termination condition  (probe != new_key)  relies on wrapping
+                                        all the way around the table and arriving back at new_key — which
+                                        only happens if at least one slot is empty somewhere in the table.
+                                        If next_prime() did not grow the table enough and bucket_used is
+                                        close to bucket_count, every slot could already be occupied by the
+                                        time a later entry is being rehashed, making full wrap-around
+                                        impossible and the loop infinite.
+
+                                        The load factor threshold (KEYS_LOAD_FACTOR_THRESHOLD) is the first
+                                        line of defence: it triggers rehash early enough that bucket_used
+                                        is always well below bucket_count.  But that threshold governs the
+                                        OLD table.  After next_prime() the new table is larger, yet by the
+                                        time the last entry of the old table is being rehashed, (bucket_used
+                                        / new_bucket_count) may still be uncomfortably high if next_prime()
+                                        returned a value only marginally larger.
+
+                                        The step counter below is the second line of defence.  If we have
+                                        probed more than bucket_count slots without finding an empty one,
+                                        the table is effectively full and continued probing is pointless.
+                                        We throw rather than spin forever.
+                                     */                                 
                                     size_t probe = (new_key + 1) % bucket_count;
-                                    while (probe != new_key)
+                                    size_t steps = 0; // for counting the number of steps taken to find an empty slot
+                                                      // This is a safety measure against infinite loops in case the table is full (never grown enough by next_prime()).
+                                                      // However, given the load factor, this should never happen as soon table size reaches this threshold, it will rehash and increase its size.   
+                                                      // Even saftey counter is getting included.
+
+                                    // Linear probing to find an empty slot, until collision happens.
+                                    while (probe != new_key /*&& steps < bucket_count*/) // Until we circle back to the original index/key
                                     {
                                         if (new_hash_table[probe] == nullptr)
                                         {
@@ -549,7 +585,36 @@ class Parser
                                             new_index_table[hash_table[i]->word_id] = probe;  
                                             break;
                                         }
-                                        probe = (probe + 1) % bucket_count;
+                                        probe = (probe + 1) % bucket_count; // Linear probing with wrap-around at the end of the table
+                                                                            // If table is not big enough, then due to wrap-around collision with new_key may never happen.
+                                                                            // So, we are at risk of infinite loop here.
+            
+                                        steps = steps + 1; // Increment the safety counter
+
+                                        /*
+                                            Safety guard — should never fire under normal operating conditions.
+                                            If it does fire, it means next_prime() returned a value too close
+                                            to the old bucket_count, the new table filled up before all old
+                                            entries could be rehashed, and the wrap-around termination
+                                            condition (probe != new_key) can no longer be reached.
+                                            Increase KEYS_LOAD_FACTOR_THRESHOLD (lower the threshold ratio)
+                                            or ensure next_prime() grows the table by at least 2x to
+                                            guarantee sufficient headroom after every rehash.
+                                        */
+                                        if (steps >= bucket_count)
+                                        {
+                                            throw std::runtime_error(
+                                                "Parser::build_hash_table() Fatal: rehash linear probe "
+                                                "exhausted all " + std::to_string(bucket_count) + " buckets "
+                                                "while relocating word \"" + hash_table[i]->word + "\" "
+                                                "(word_id=" + std::to_string(hash_table[i]->word_id) + "). "
+                                                "The new table is full: bucket_used=" + std::to_string(bucket_used) +
+                                                " vs bucket_count=" + std::to_string(bucket_count) + ". "
+                                                "next_prime() did not grow the table enough — lower "
+                                                "KEYS_LOAD_FACTOR_THRESHOLD or guarantee next_prime() "
+                                                "returns at least 2x the previous bucket count."
+                                            );
+                                        }                                                                            
                                     }                                    
                                 }
 

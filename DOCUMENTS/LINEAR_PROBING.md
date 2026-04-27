@@ -236,6 +236,22 @@ After rehash:   bucket_count = 1013, bucket_used = 707  → load = 0.698 (just u
 
 > **Note:** The implementation calls `Keys::next_prime(bucket_count)` which returns only the next prime immediately above the current size (e.g. `1009 → 1013`). For large corpora this will trigger rehashing again very quickly. A more robust strategy is `Keys::next_prime(bucket_count * 2)` to roughly double capacity and keep the load factor low for longer.
 
+```
+`next_prime(bucket_count)` produces minimal growth, the load factor barely
+drops and rehashing triggers again almost immediately:
+
+    Before: bucket_count = 1009, bucket_used = 707  → load = 0.700
+    After:  bucket_count = 1013, bucket_used = 707  → load = 0.698
+
+`next_prime(bucket_count * 2)` amortises the cost of rehashing, the load factor drops
+significantly and the table grows comfortably before the next rehash:
+
+    Before: bucket_count = 1009, bucket_used = 707  → load = 0.700
+    After:  bucket_count = 2029, bucket_used = 707  → load = 0.348
+
+ In both cases, next_prime() is fine, but the latter would just reduce the frequency of rehashing and save the computational cost of rehashing, by keeping the load factor low for longer.   
+``` 
+
 ---
 
 ## 8. Why the Wrap-Around (`% bucket_count`) Matters
@@ -278,13 +294,15 @@ If `probe` returns to `key`, every bucket has been visited and no empty slot was
 
 Because probing is strictly sequential, a run of occupied consecutive buckets tends to grow. Any word whose hash lands anywhere in that run extends it further. This is called **primary clustering** and it degrades lookup time from O(1) average toward O(n) worst case.
 
-```
+```text
 Buckets: [_][_][X][X][X][X][_][_]
                  ↑─────────────┘
          Any key hashing here joins the cluster and extends it.
+```
 
-There is no randomness, no skipping. Every displaced word lands as close to its home bucket as possible, and that closeness is exactly what causes clusters to merge. If bucket 7 is full and "start" goes to bucket 8, then any word that hashes to 8 now has to probe to 9 — even though it had no collision to begin with. Buckets 7, 8, and 9 are now a single cluster even though only bucket 7 had the original collision.
+As you can see, there is no randomness, no skipping. Every displaced word lands as close to its home bucket as possible, and that closeness is exactly what causes clusters to merge. If bucket 7 is full and "start" goes to bucket 8, then any word that hashes to 8 now has to probe to 9 — even though it had no collision to begin with. Buckets 7, 8, and 9 are now a single cluster even though only bucket 7 had the original collision.
 
+```cpp
 // What it looks like in the code
 
 size_t probe = (key + 1) % bucket_count;
@@ -297,6 +315,8 @@ while (probe != key)
 ```
 
 The implementation mitigates this by keeping the load factor below `0.7`, which statistically limits average cluster length.
+
+---
 
 ### Why 0.7 is the threshold, not 0.9 or 0.5
 

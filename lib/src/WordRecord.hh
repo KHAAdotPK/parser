@@ -50,6 +50,18 @@ struct OccurrenceNode
     OccurrenceNode& operator=(const OccurrenceNode&) = default;
 };
 
+/*
+ * The set of hash tables for efficiently indexing tokens encountered
+ * during iteration over a corpus.
+ * 
+ * NOTE: In this file, the word "token" can be replaced with "word" in your mind.
+ * 
+ * This structure centralises all hash-table logic, including:
+ * - Hash-to-WordRecord mapping (hash_to_word_record)
+ * - Word-ID-to-hash-index mapping (word_id_to_hash)
+ * - Hash-table metadata (bucket_count, bucket_used)
+ * - Corpus statistics (maximum_tokens_per_line, minimum_tokens_per_line, total_tokens)
+ */
 struct Tables 
 {
     WordRecord** hash_to_word_record; // a.k.a hash_table
@@ -83,7 +95,7 @@ struct Tables
      * When this ratio exceeds KEYS_LOAD_FACTOR_THRESHOLD, the hash table
      * is rehashed and bucket_count is updated to the next suitable prime.
      */
-    size_t bucket_used;
+    size_t bucket_used; // Vocabulary size. The size of corpus without redundancy.
  
     /*
         Reference Count
@@ -106,6 +118,13 @@ struct Tables
         This is the size of smallest line in number of tokens
     */  
     size_t minimum_tokens_per_line;
+
+    /*
+     * Total Number of Tokens (with redundancy)
+     * ---------------------------------------
+     * This represents the total number of tokens in the corpus.
+     */
+    size_t total_tokens;
 
     size_t get_bucket_count(void) const
     {

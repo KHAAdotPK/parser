@@ -316,6 +316,7 @@ class Parser
             size_t token_number = 0;
 
             size_t mxntpl = 0, mnntpl = std::numeric_limits<size_t>::max();; // Maximum and Minimum number of tokens in a largest and smallest line
+            size_t tnt = 0; // Total number of tokens
 
             try
             {
@@ -632,6 +633,8 @@ class Parser
                         hash_table = new_hash_table;
                         index_table = new_index_table;                        
                     }
+
+                    tnt = tnt + 1; // Total number of tokens in the corpus.
                 }
 
                 if (token_number > mxntpl)
@@ -673,6 +676,7 @@ class Parser
 
                 tables->maximum_tokens_per_line = mxntpl;
                 tables->minimum_tokens_per_line = mnntpl;
+                tables->total_tokens = tnt;
             }
             catch (const std::bad_alloc& e)
             {

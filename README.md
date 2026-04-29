@@ -12,9 +12,25 @@ A lightweight C++ library for streaming CSV corpora and building an in-memory vo
 
 ## Intended Use
 
-`Parser` is **not meant to be used as a standalone application**. It is a dependency library, designed to be consumed by higher-level NLP packages. A good example of such a package is [naqsh](https://github.com/KHAAdotPK/naqsh), which uses `Parser` to build its vocabulary index during corpus preprocessing.
+If you are building a package that needs corpus tokenisation and vocabulary indexing, `Parser` (along with its own dependency [Hash](https://github.com/KHAAdotPK/Hash)) should be cloned into the `lib/` directory of your package.
 
-If you are building a package that needs corpus tokenisation and vocabulary indexing, `Parser` (along with its own dependency [Hash](https://github.com/KHAAdotPK/Hash)) should be cloned into the `lib/` directory of your package — not installed system-wide or used directly.
+### Optional Text Cleaning
+
+Before tokenisation, `Parser`'s `Iterator` can pass each line through a `Cleaner`
+object to strip punctuation and noise characters. This is activated by defining
+`ITERATOR_USER_DEFINED_CLEANER_CODE` before including `Parser/header.hh`.
+
+Two cleaning packages are available depending on the language of your corpus:
+
+| Package | Language | Repository |
+|---|---|---|
+| [Imprint](https://github.com/KHAAdotPK/Imprint.git) | English | Unicode-aware punctuation stripping for English text |
+| [Naqsh](https://github.com/KHAAdotPK/Naqsh.git) | Urdu | Unicode-aware punctuation and noise normalisation for Urdu text |
+
+Neither package is meant to be used standalone — they are designed specifically
+to plug into `Parser` via the `ITERATOR_USER_DEFINED_CLEANER_CODE` macro hook.
+The chosen cleaning package must be cloned into `lib/` and included **before**
+`Parser/header.hh` so that `Cleaner` is in scope when `Iterator.hh` compiles.
 
 ---
 
@@ -51,7 +67,7 @@ The expected layout inside your package's `lib/` directory is:
 lib/
 ├── Parser/
 │   ├── header.hh
-│   └── src/
+│   └── lib/src/
 │       ├── WordRecord.hh
 │       ├── Iterator.hh
 │       └── Parser.hh

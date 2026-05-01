@@ -10,7 +10,7 @@ struct OccurrenceNode;
 
 struct WordRecord
 {
-    size_t word_id;         // unique integer assigned to this word
+    size_t word_id;         // unique integer assigned to this word, index into "word_id_to_hash table"
     std::string word;       // the word itself
     OccurrenceNode* head;   // points to first occurrence in corpus
 
@@ -144,9 +144,36 @@ struct Tables
     size_t get_minimum_tokens_per_line(void) const
     {
         return minimum_tokens_per_line;
-    }   
+    }
+    
+    size_t get_total_tokens(void) const
+    {
+        return total_tokens;
+    }
 };
 
 typedef struct Tables TABLES;
+
+struct Token
+{
+    size_t token_id; // unique integer assigned to this token, index into "word_id_to_hash table"
+    OccurrenceNode* occurrence; // pointer to the occurrence of this token in the corpus
+
+    struct Token* next; // pointer to next token
+    struct Token* prev; // pointer to previous token
+};
+
+struct Line 
+{
+    size_t n; // number of tokens in the line
+    struct Token* tokens; // pointer to the first token in the line
+
+    struct Line* next; // pointer to next line
+    struct Line* prev; // pointer to previous line
+};
+
+typedef struct Token TOKEN;
+typedef struct Line LINE;
+
 
 #endif // WORD_RECORD_HH

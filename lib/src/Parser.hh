@@ -310,8 +310,13 @@ class Parser
             size_t bucket_count = KEYS_COMMON_STARTING_SIZE;
             size_t bucket_used = 0;
 
+            // hash_table is indexed by hash key, stores pointers to WordRecord object
             WordRecord** hash_table = nullptr;
-            size_t* index_table = nullptr; 
+            // index_table is indexed by word_id (0..bucket_used-1)
+            size_t* index_table = nullptr;
+            // Linked list of lines in the corpus. Each line contains an array of tokens in that line.
+            LINE *lines_head = nullptr, *lines_tail = nullptr;
+
             size_t line_number = 0;
             size_t token_number = 0;
 
@@ -335,11 +340,78 @@ class Parser
                 // Corpus can be large. This is a real possibility, not a formality.             
                 throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
             }
-
+        
             for (auto& line : *this)
-            {      
+            { 
+                if (lines_head == nullptr) // First line — need to create head of the linked list of lines
+                {
+                    try
+                    {
+                        lines_head = new LINE(); // Create a new line and append it to the linked list of lines
+                        lines_head->prev = nullptr;
+                        lines_head->next = nullptr;
+                        lines_tail = lines_head; // Set the tail pointer to the head (since it's the only line so far)
+                    }
+                    catch (const std::bad_alloc& e)
+                    {
+                        throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+                    }  
+                }
+                else
+                {
+                    try
+                    {
+                        lines_tail->next = new LINE(); // Create a new line and append it to the linked list of lines
+                        lines_tail->next->prev = lines_tail;
+                        lines_tail->next->next = nullptr;
+                        lines_tail = lines_tail->next; // Move the new line pointer to the tail pointer
+                    }
+                    catch (const std::bad_alloc& e)
+                    {
+                        throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+                    }
+                }
+
+                lines_tail->n = 0; // Set the number of tokens in the line
+                lines_tail->tokens = nullptr; // Set the pointer to the first token in the line
+
+                TOKEN* tokens = nullptr; // Traversal cursor for the linked list of tokens in the current line
+                                
                 for (auto& token : line)
-                {   
+                {
+                    if (lines_tail->tokens == nullptr) // First token in the line — need to create head of the token linked list for this line
+                    {
+                        try
+                        {
+                            lines_tail->tokens = new TOKEN(); // Create a new token and append it to the linked list of tokens for this line
+                            lines_tail->tokens->next = nullptr;
+                            lines_tail->tokens->prev = nullptr;
+
+                            tokens = lines_tail->tokens; // Set the token pointer to the head of the token linked list for this line
+                        }
+                        catch (const std::bad_alloc& e)
+                        {
+                            throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+                        }                        
+                    }
+                    else
+                    {
+                        try
+                        {
+                            tokens->next = new TOKEN(); // Create a new token and append it to the linked list of tokens for this line
+                            tokens->next->prev = tokens;
+                            tokens->next->next = nullptr;
+
+                            tokens = tokens->next; // Move the token pointer to the new token
+                        }
+                        catch (const std::bad_alloc& e)
+                        {
+                            throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
+                        }                        
+                    }
+
+                    lines_tail->n++; // Increment the number of tokens in the line
+
                     size_t key = Keys::generate_key(token, bucket_count);
 
                     OccurrenceNode* occurrence = nullptr;
@@ -369,6 +441,11 @@ class Parser
                             }
                             throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
                         }
+
+                        tokens->token_id = word_record->word_id; // Set the token_id of the token to the word_id of the word_record
+                        tokens->occurrence = occurrence; // Set the occurrence of the token to the occurrence node created for the word_record
+
+                        /*lines_tail->n++;*/ // Increment the number of tokens in the line
                         
                         bucket_used++; // Increment the number of buckets used                        
                     }
@@ -410,7 +487,12 @@ class Parser
                                             delete word_record;
                                         }
                                         throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
-                                    }                                    
+                                    }
+                                    
+                                    tokens->token_id = word_record->word_id; // Set the token_id of the token to the word_id of the word_record
+                                    tokens->occurrence = occurrence; // Set the occurrence of the token to the occurrence node
+
+                                    /*lines_tail->n++;*/ // Increment the number of tokens in the line
                                     
                                     bucket_used++;
                                     break;
@@ -433,7 +515,12 @@ class Parser
                                     catch (const std::bad_alloc& e)
                                     { 
                                         throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
-                                    }     
+                                    }
+                                    
+                                    tokens->token_id = word_record->word_id; // Set the token_id of the token to the word_id of the word_record
+                                    tokens->occurrence = occurrence->next; // Set the occurrence of the token to the occurrence node created for the word_record
+
+                                    /*lines_tail->n++;*/ // Increment the number of tokens in the line
 
                                     break;
                                 }
@@ -458,7 +545,12 @@ class Parser
                             catch (const std::bad_alloc& e) 
                             { 
                                 throw std::runtime_error("Parser::build_hash_table(void) Error: " + std::string(e.what()));
-                            }     
+                            }
+                            
+                            tokens->token_id = word_record->word_id; // Set the token_id of the token to the word_id of the word_record 
+                            tokens->occurrence = occurrence->next; // Set the occurrence of the token to the occurrence node created for the word_record
+
+                            /*lines_tail->n++;*/ // Increment the number of tokens in the line
                         }
                     }
                     

@@ -152,8 +152,32 @@ class Parser
             Bidirectional lookup:
                 token string  →  generate_key()             →  hash_to_word_record[key]  →  WordRecord
                 word_id       →  word_id_to_hash[word_id]   →  hash_to_word_record[key]  →  WordRecord
- 
- 
+
+        3.  lines   (LINE*)
+        ──────────────────────────────────────────────────
+        Head of a singly-traversable doubly-linked list of LINE nodes, one per
+        line in the corpus, in corpus order.
+
+            LINE
+            ├── n       → size_t   number of tokens in this line
+            ├── tokens  → TOKEN*   head of the token linked list for this line
+            ├── next    → LINE*    next line in corpus order
+            └── prev    → LINE*    previous line
+
+            Each TOKEN node:
+            ├── token_id   → size_t          word_id of this token (index into embedding matrix)
+            ├── occurrence → OccurrenceNode* pointer to this token's specific occurrence record
+            ├── next       → TOKEN*          next token in this line
+            └── prev       → TOKEN*          previous token in this line
+
+        This structure preserves the full sequential layout of the corpus — every
+        line, every token in order — independently of the hash table.  It enables
+        O(n) corpus traversal without rehashing or re-reading the file.
+
+        CRITICAL: LINE and TOKEN nodes are never touched during rehash.  Their
+        token_id and occurrence fields reference heap objects (WordRecord,
+        OccurrenceNode) that are stable for the lifetime of TABLES.
+  
         ════════════════════════════════════════════════════════════════════════════════════
         ALGORITHM — TOKEN PROCESSING (per token, three cases)
         ════════════════════════════════════════════════════════════════════════════════════
@@ -234,8 +258,13 @@ class Parser
  
         Prime-sized tables distribute hash keys more uniformly, reducing the likelihood
         of systematic clustering from any particular hash function.
- 
- 
+
+        CRITICAL: Only the bucket arrays are freed.  WordRecord and OccurrenceNode
+        objects live on the heap independently.  Their pointers are simply copied into
+        the new arrays.  All occurrence linked lists survive rehash completely intact.
+        LINE and TOKEN linked lists are entirely unaffected by rehash — they hold
+        word_id and OccurrenceNode* values, neither of which is a bucket index.
+  
         ════════════════════════════════════════════════════════════════════════════════════
         LINE / TOKEN COUNTERS
         ════════════════════════════════════════════════════════════════════════════════════
@@ -275,8 +304,14 @@ class Parser
         •  WordRecord and OccurrenceNode are never freed during rehash
                Only arrays are reallocated.  Heap objects are stable for the lifetime
                of the TABLES structure.
- 
- 
+
+        •  LINE list length == line_number at end of build
+               One LINE node is allocated per corpus line, in order.
+
+        •  TOKEN list length for each LINE == LINE::n
+               Incremented exactly once per token at the top of the token loop.
+               No branch inside the loop touches LINE::n.               
+  
         ════════════════════════════════════════════════════════════════════════════════════
         CONNECTION TO THE TRANSFORMER
         ════════════════════════════════════════════════════════════════════════════════════
@@ -291,13 +326,19 @@ class Parser
         The hash table provides:
             token string  →  word_id          O(1) average,  used at encode time
             word_id       →  token string     O(1),          used at decode time
+
+        The lines linked list provides:
+            corpus position  →  TOKEN node  →  token_id + occurrence   O(n) traversal
+            Enables sequence reconstruction needed for positional encoding and
+            attention mask generation without re-reading the file.    
  
         See TABLES.md for full documentation including memory layout diagrams.
- 
- 
+          
         RETURNS
         -------
         TABLES*  — heap-allocated, ref_count = 1, ownership transfers to caller.
+                   Contains hash_to_word_record, word_id_to_hash, and lines —
+                   the complete vocabulary table and corpus layout.
  
         THROWS
         ------
@@ -760,6 +801,7 @@ class Parser
 
                 tables->hash_to_word_record = hash_table;
                 tables->word_id_to_hash = index_table;
+                tables->lines = lines_head;
 
                 tables->bucket_count = bucket_count;
                 tables->bucket_used = bucket_used;

@@ -6,6 +6,8 @@
 #ifndef WORD_RECORD_HH
 #define WORD_RECORD_HH
 
+// Forward declarations
+struct Line; 
 struct OccurrenceNode;
 
 struct WordRecord
@@ -66,6 +68,7 @@ struct Tables
 {
     WordRecord** hash_to_word_record; // a.k.a hash_table
     size_t* word_id_to_hash; // a.k.a index_table
+    Line* lines; // Linked list of lines in the corpus, each containing a linked list of tokens
 
     /*
      * The number of buckets in the hash table used to index tokens encountered
@@ -125,6 +128,9 @@ struct Tables
      * This represents the total number of tokens in the corpus.
      */
     size_t total_tokens;
+
+
+    // Accessor methods
 
     size_t get_bucket_count(void) const
     {

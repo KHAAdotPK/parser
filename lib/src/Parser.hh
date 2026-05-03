@@ -458,6 +458,7 @@ class Parser
                     OccurrenceNode* occurrence = nullptr;
                     WordRecord* word_record = nullptr;
 
+                    // CASE A: bucket empty → new word
                     if (hash_table[key] == nullptr) // If the bucket is empty, it means the token/word is new
                     {
                         //std::cout<< "New bucket created for " << token << " at line " << line_number << " and token " << token_number << std::endl; 
@@ -465,7 +466,7 @@ class Parser
                         try
                         {
                             occurrence = new OccurrenceNode(line_number, token_number, nullptr, nullptr);
-                            word_record = new WordRecord(/*token_number*/ bucket_used, token, occurrence);
+                            word_record = new WordRecord(/*token_number*/ bucket_used, token, 1, occurrence); // Initialize it to 1 on first insertion
                             hash_table[key] = word_record;
                             index_table[/*token_number*/ word_record->word_id] = key;
                         }
@@ -488,7 +489,7 @@ class Parser
 
                         /*lines_tail->n++;*/ // Increment the number of tokens in the line
                         
-                        bucket_used++; // Increment the number of buckets used                        
+                        bucket_used++; // Increment the number of buckets used                                                 
                     }
                     else
                     {
@@ -504,6 +505,7 @@ class Parser
                             size_t probe = (key + 1) % bucket_count;
                             while (probe != key)
                             {
+                                // Case D — empty bucket during probe — new word displaced from natural bucket
                                 if (hash_table[probe] == nullptr)
                                 {
                                     // Found empty slot — treat as new word
@@ -512,7 +514,7 @@ class Parser
                                     try 
                                     { 
                                         occurrence = new OccurrenceNode(line_number, token_number, nullptr, nullptr);
-                                        word_record = new WordRecord(/*token_number*/ bucket_used, token, occurrence);
+                                        word_record = new WordRecord(/*token_number*/ bucket_used, token, 1, occurrence); // Initialize it to 1 on first insertion
                                         hash_table[probe] = word_record;
                                         index_table[/*token_number*/ word_record->word_id] = /*key*/probe;
                                     }
@@ -534,10 +536,11 @@ class Parser
                                     tokens->occurrence = occurrence; // Set the occurrence of the token to the occurrence node
 
                                     /*lines_tail->n++;*/ // Increment the number of tokens in the line
-                                    
+                                                                       
                                     bucket_used++;
                                     break;
                                 }
+                                // Case C  (probe match) — same word, displaced from natural bucket                                
                                 else if (hash_table[probe]->word == token)
                                 {
                                     // Found the actual matching word
@@ -560,8 +563,11 @@ class Parser
                                     
                                     tokens->token_id = word_record->word_id; // Set the token_id of the token to the word_id of the word_record
                                     tokens->occurrence = occurrence->next; // Set the occurrence of the token to the occurrence node created for the word_record
-
+                                    
                                     /*lines_tail->n++;*/ // Increment the number of tokens in the line
+
+                                    // Increment the n of occurrence node for this token/word in the line
+                                    word_record->n++; // Increment the n of the word_record for this token/word in the corpus
 
                                     break;
                                 }
@@ -570,7 +576,7 @@ class Parser
                         }
                         else
                         {
-                            // Found the actual matching word
+                            // Case B — same word (direct match), no collision                            
                             word_record = hash_table[key];
 
                             occurrence = word_record->head; // Get the head of the linked list
@@ -592,6 +598,9 @@ class Parser
                             tokens->occurrence = occurrence->next; // Set the occurrence of the token to the occurrence node created for the word_record
 
                             /*lines_tail->n++;*/ // Increment the number of tokens in the line
+
+                            // Increment the n of occurrence node for this token/word in the line
+                            word_record->n++; // Increment the n of the word_record for this token/word in the corpus
                         }
                     }
                     

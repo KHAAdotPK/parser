@@ -14,9 +14,19 @@ struct WordRecord
 {
     size_t word_id;         // unique integer assigned to this word, index into "word_id_to_hash table"
     std::string word;       // the word itself
-    OccurrenceNode* head;   // points to first occurrence in corpus
+    /*  
+        Number of occurrences of this word/word_id in the corpus.     
+        Make sure n is being incremented in all following cases:
 
-    WordRecord(size_t _word_id, std::string _word, OccurrenceNode* _head) : word_id(_word_id), word(_word), head(_head)
+        Case B  — hash_table[key]->word == token (direct match)     → word_record->n++ 
+        Case C  — hash_table[probe]->word == token (probe match)    → word_record->n++ 
+        Case A  — hash_table[key] == nullptr (new word)             → n initialised to 1
+        Case D  — hash_table[probe] == nullptr (new displaced word) → n initialised to 1
+     */
+    size_t n; // Frequency of this word in the corpus. The number of occurrences of this token/word in the corpus.
+    OccurrenceNode* head;   // points to first occurrence in corpus
+    
+    WordRecord(size_t _word_id, std::string _word, size_t _n, OccurrenceNode* _head) : word_id(_word_id), word(_word), n(_n), head(_head)
     {
         /* this->word_id = word_id;
         this->word = word;

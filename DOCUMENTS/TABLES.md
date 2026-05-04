@@ -20,9 +20,14 @@ Represents a single unique word (token) in the vocabulary.
 
 ```
 WordRecord
-├── word_id     → size_t          — unique sequential ID assigned at insertion time (0, 1, 2, ...)
-├── word        → std::string     — the actual token string (e.g. "hello", "the", "transformer")
-└── head        → OccurrenceNode* — pointer to the head of the occurrence linked list
+├── word_id                 (unique integer, assigned in order of first encounter)
+├── word                    (the token string)
+├── n                       (total occurrences in corpus — equals length of occurrence
+│                            list. Initialised to 1 on first insertion, incremented on
+│                            every repeat. Enables O(1) frequency and probability
+│                            queries without traversing the list.)
+└── head → OccurrenceNode ⇄ OccurrenceNode ⇄ ...
+              (doubly-linked list of every position in the corpus)
 ```
 
 `word_id` is assigned as `bucket_used` at the time of insertion. It is dense and sequential, making it a direct row index into the embedding matrix.

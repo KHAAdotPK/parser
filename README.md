@@ -112,8 +112,12 @@ TABLES
 WordRecord
 ├── word_id                 (unique integer, assigned in order of first encounter)
 ├── word                    (the token string)
+├── n                       (total occurrences in corpus — equals length of occurrence
+│                            list. Initialised to 1 on first insertion, incremented on
+│                            every repeat. Enables O(1) frequency and probability
+│                            queries without traversing the list.)
 └── head → OccurrenceNode ⇄ OccurrenceNode ⇄ ...
-              (doubly-linked list of every position in the corpus)
+              (doubly-linked list of every position in the corpus)              
 
 OccurrenceNode
 ├── line                    (line number of this occurrence)
@@ -178,6 +182,8 @@ TABLES* tables = parser.build_hash_table();
 ## Known Issues and Roadmap
 
 - [x] ~~Collision handling — add linear probing or chaining to eliminate silent data loss on hash collision~~ — **Implemented.** Full linear probing is in place for both insertion and rehashing. Word-string comparison guards every lookup so displaced words are always found correctly and never silently overwritten.
+- [x] ~~Frequency counting — required traversing the OccurrenceNode linked list
+      to count occurrences, making frequency and probability queries O(k)~~ — **Implemented.** `WordRecord::n` is incremented during `build_hash_table()` at every occurrence. Frequency and probability are now O(1) field reads.
 - [ ] `TABLES` destructor — no recursive deallocation of `WordRecord` objects and `OccurrenceNode` chains; caller must walk the table to free memory
 - [ ] `ref_count` enforcement — manual reference counting on `TABLES` is not encapsulated; consider wrapping in `std::shared_ptr` or adding `acquire`/`release` methods
 - [ ] Remove dead commented-out member variables from `Parser` class body

@@ -102,61 +102,67 @@ class Parser
         // Destructor – file closed automatically
         ~Parser() = default;
 
-         /*
-        ╔══════════════════════════════════════════════════════════════════════════════════╗
-        ║                           build_hash_table()                                     ║
-        ╚══════════════════════════════════════════════════════════════════════════════════╝
- 
-        PURPOSE
-        -------
-        Iterates over the entire corpus once and builds two parallel arrays that together
-        form the vocabulary table of the tokenizer.  Every unique token in the corpus is
-        assigned a permanent, dense, sequential ID (word_id = 0, 1, 2, …) and stored in
-        a hash table for O(1) average-case lookup.  Every position at which a token
-        appears (line_number, token_number) is recorded in a per-word linked list so that
-        occurrence data is fully pre-built by the time this function returns — no second
-        pass over the corpus is ever needed.
- 
-        The returned TABLES* object is heap-allocated and its ownership transfers to the
-        caller.  ref_count is initialised to 1.
- 
- 
-        ════════════════════════════════════════════════════════════════════════════════════
-        DATA STRUCTURES PRODUCED
-        ════════════════════════════════════════════════════════════════════════════════════
- 
-        1.  hash_to_word_record   (WordRecord*[bucket_count])
+        /*
+            ╔══════════════════════════════════════════════════════════════════════════════════╗
+            ║                           build_hash_table()                                     ║
+            ╚══════════════════════════════════════════════════════════════════════════════════╝
+
+            PURPOSE
+            -------
+            Iterates over the entire corpus once and builds two parallel arrays that together
+            form the vocabulary table of the tokenizer.  Every unique token in the corpus is
+            assigned a permanent, dense, sequential ID (word_id = 0, 1, 2, …) and stored in
+            a hash table for O(1) average-case lookup.  Every position at which a token
+            appears (line_number, token_number) is recorded in a per-word linked list so that
+            occurrence data is fully pre-built by the time this function returns — no second
+            pass over the corpus is ever needed.
+
+            The returned TABLES* object is heap-allocated and its ownership transfers to the
+            caller.  ref_count is initialised to 1.
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            DATA STRUCTURES PRODUCED
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            1.  hash_to_word_record   (WordRecord*[bucket_count])
             ─────────────────────────────────────────────────
             Flat array of pointers.  Index = hash key derived from the token string.
             Each non-null slot points to a WordRecord on the heap:
- 
-                WordRecord
-                ├── word_id  → size_t          dense sequential ID, row index into embedding matrix
-                ├── word     → string          the token string itself
-                └── head     → OccurrenceNode* head of the occurrence linked list
- 
+
+            WordRecord
+            ├── word_id  → size_t          dense sequential ID, row index into embedding matrix
+            ├── word     → string          the token string itself
+            ├── n        → size_t          total number of times this word appears in the corpus
+            │                             Initialised to 1 on first insertion (Cases A and D).
+            │                             Incremented by 1 on every subsequent occurrence
+            │                             (Cases B and C).  Always equals the length of the
+            │                             occurrence linked list.  Enables O(1) frequency
+            │                             and probability queries without traversing the list.
+            └── head     → OccurrenceNode* head of the occurrence linked list
+
             Each OccurrenceNode:
-                ├── line_number   → size_t          line in the corpus (0-based, never reset)
-                ├── token_number  → size_t          position within that line (0-based, reset per line)
-                ├── next          → OccurrenceNode* next occurrence in corpus order
-                └── prev          → OccurrenceNode* previous occurrence (doubly linked)
- 
+                 ├── line   → size_t          line in the corpus (0-based, never reset)
+                 ├── token  → size_t          position within that line (0-based, reset per line)
+                 ├── next   → OccurrenceNode* next occurrence in corpus order
+                 └── prev   → OccurrenceNode* previous occurrence (doubly linked)
+
             Occurrences are appended to the tail so the list is always in corpus order.
- 
-        2.  word_id_to_hash   (size_t[bucket_count])
+
+            2.  word_id_to_hash   (size_t[bucket_count])
             ──────────────────────────────────────────
             Parallel array indexed by word_id.  Stores the bucket index at which that
             word's WordRecord actually lives in hash_to_word_record.  Needed because
             linear probing can displace a word from its natural hash key.
- 
+
             Bidirectional lookup:
                 token string  →  generate_key()             →  hash_to_word_record[key]  →  WordRecord
                 word_id       →  word_id_to_hash[word_id]   →  hash_to_word_record[key]  →  WordRecord
 
-        3.  lines   (LINE*)
-        ──────────────────────────────────────────────────
-        Head of a singly-traversable doubly-linked list of LINE nodes, one per
-        line in the corpus, in corpus order.
+            3.  lines   (LINE*)
+            ──────────────────────────────────────────────────
+            Head of a singly-traversable doubly-linked list of LINE nodes, one per
+            line in the corpus, in corpus order.
 
             LINE
             ├── n       → size_t   number of tokens in this line
@@ -165,186 +171,223 @@ class Parser
             └── prev    → LINE*    previous line
 
             Each TOKEN node:
-            ├── token_id   → size_t          word_id of this token (index into embedding matrix)
-            ├── occurrence → OccurrenceNode* pointer to this token's specific occurrence record
-            ├── next       → TOKEN*          next token in this line
-            └── prev       → TOKEN*          previous token in this line
+                 ├── token_id   → size_t          word_id of this token (index into embedding matrix)
+                 ├── occurrence → OccurrenceNode* pointer to this token's specific occurrence record
+                 ├── next       → TOKEN*          next token in this line
+                 └── prev       → TOKEN*          previous token in this line
 
-        This structure preserves the full sequential layout of the corpus — every
-        line, every token in order — independently of the hash table.  It enables
-        O(n) corpus traversal without rehashing or re-reading the file.
+            This structure preserves the full sequential layout of the corpus — every
+            line, every token in order — independently of the hash table.  It enables
+            O(n) corpus traversal without rehashing or re-reading the file.
 
-        CRITICAL: LINE and TOKEN nodes are never touched during rehash.  Their
-        token_id and occurrence fields reference heap objects (WordRecord,
-        OccurrenceNode) that are stable for the lifetime of TABLES.
-  
-        ════════════════════════════════════════════════════════════════════════════════════
-        ALGORITHM — TOKEN PROCESSING (per token, three cases)
-        ════════════════════════════════════════════════════════════════════════════════════
- 
-        key = Keys::generate_key(token, bucket_count)
- 
-        ┌─────────────────────────────────────────────────────────────────────────────┐
-        │ CASE A │ hash_table[key] == nullptr          (bucket empty → new word)      │
-        ├─────────────────────────────────────────────────────────────────────────────┤
-        │  1. Allocate OccurrenceNode(line_number, token_number, next=null, prev=null)│
-        │  2. Allocate WordRecord(word_id=bucket_used, word=token, head=occurrence)   │
-        │  3. hash_table[key]              = word_record                              │
-        │  4. index_table[word_record->word_id] = key                                 │
-        │  5. bucket_used++                                                           │
-        └─────────────────────────────────────────────────────────────────────────────┘
- 
-        ┌─────────────────────────────────────────────────────────────────────────────┐
-        │ CASE B │ hash_table[key]->word == token      (same word, no collision)      │
-        ├─────────────────────────────────────────────────────────────────────────────┤
-        │  1. word_record = hash_table[key]                                           │
-        │  2. Traverse occurrence list from head to tail                              │
-        │  3. Append new OccurrenceNode(line_number, token_number, next=null, prev=tail)│
-        │  bucket_used is NOT incremented — word already registered                    │
-        └─────────────────────────────────────────────────────────────────────────────┘
- 
-        ┌─────────────────────────────────────────────────────────────────────────────┐
-        │ CASE C │ hash_table[key]->word != token      (hash collision)               │
-        ├─────────────────────────────────────────────────────────────────────────────┤
-        │  Linear probe:  probe = (key + 1) % bucket_count,  advance until:           │
-        │                                                                             │
-        │  • hash_table[probe] == nullptr                                             │
-        │        New word displaced from natural bucket.                              │
-        │        Allocate OccurrenceNode + WordRecord, place at probe.                │
-        │        index_table[word_id] = probe   ← MUST store probe, not key           │
-        │        bucket_used++                                                        │
-        │                                                                             │
-        │  • hash_table[probe]->word == token                                         │
-        │        Word was previously displaced here.  Found it.                       │
-        │        Traverse its occurrence list and append new OccurrenceNode.          │
-        │                                                                             │
-        │  • otherwise: probe = (probe + 1) % bucket_count  — keep scanning           │
-        └─────────────────────────────────────────────────────────────────────────────┘
- 
-        NOTE ON COLLISION SAFETY
-        ────────────────────────
-        The load factor threshold (KEYS_LOAD_FACTOR_THRESHOLD) keeps bucket_used well
-        below bucket_count, which keeps probe chains short on average.  However, the
-        load factor only reduces collision *probability* — it does not eliminate it.
-        Two distinct words can always hash to the same bucket regardless of load factor.
-        The word-comparison checks in Cases B and C are therefore mandatory correctness
-        logic, not optional optimisations.
- 
- 
-        ════════════════════════════════════════════════════════════════════════════════════
-        REHASHING
-        ════════════════════════════════════════════════════════════════════════════════════
- 
-        Triggered after every insertion when:
-            (double)bucket_used / (double)bucket_count  >  KEYS_LOAD_FACTOR_THRESHOLD
- 
-        Procedure:
-            1.  bucket_count = Keys::next_prime(bucket_count)   — grow to next prime
-            2.  Allocate new_hash_table[bucket_count]() and new_index_table[bucket_count]()
-            3.  For every occupied slot i in the old table:
+            CRITICAL: LINE and TOKEN nodes are never touched during rehash.  Their
+            token_id and occurrence fields reference heap objects (WordRecord,
+            OccurrenceNode) that are stable for the lifetime of TABLES.
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            ALGORITHM — TOKEN PROCESSING (per token, four cases)
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            key = Keys::generate_key(token, bucket_count)
+
+            ┌─────────────────────────────────────────────────────────────────────────────┐
+            │ CASE A │ hash_table[key] == nullptr          (bucket empty → new word)      │
+            ├─────────────────────────────────────────────────────────────────────────────┤
+            │  1. Allocate OccurrenceNode(line_number, token_number, next=null, prev=null)│
+            │  2. Allocate WordRecord(word_id=bucket_used, word=token, n=1, head=occ)     │
+            │     n is initialised to 1 — this is the first occurrence of this word.      │
+            │  3. hash_table[key]                   = word_record                         │
+            │  4. index_table[word_record->word_id] = key                                 │
+            │  5. bucket_used++                                                           │
+            └─────────────────────────────────────────────────────────────────────────────┘
+
+            ┌─────────────────────────────────────────────────────────────────────────────┐
+            │ CASE B │ hash_table[key]->word == token      (same word, direct match)      │
+            ├─────────────────────────────────────────────────────────────────────────────┤
+            │  1. word_record = hash_table[key]                                           │
+            │  2. Traverse occurrence list from head to tail                              │
+            │  3. Append new OccurrenceNode(line_number, token_number, next=null,         |
+            |     prev=tail)                                                              │
+            │  4. word_record->n++                                                        │
+            │     Incremented because this is a repeat occurrence of an existing word.    │
+            │  bucket_used is NOT incremented — word already registered.                  │
+            └─────────────────────────────────────────────────────────────────────────────┘
+
+            ┌─────────────────────────────────────────────────────────────────────────────┐
+            │ CASE C │ hash_table[key]->word != token      (hash collision — linear probe)│
+            ├─────────────────────────────────────────────────────────────────────────────┤
+            │  Linear probe:  probe = (key + 1) % bucket_count,  advance until:           │
+            │                                                                             │
+            │  • hash_table[probe] == nullptr           (CASE D — new displaced word)     │
+            │        New word, no prior record exists.                                    │
+            │        Allocate OccurrenceNode + WordRecord(n=1), place at probe.           │
+            │        n is initialised to 1 — first occurrence of this word.               │
+            │        index_table[word_id] = probe   ← MUST store probe, not key           │
+            │        bucket_used++                                                        │
+            │                                                                             │
+            │  • hash_table[probe]->word == token       (probe match — word found)        │
+            │        Word was previously displaced here.  Found it.                       │
+            │        Traverse its occurrence list and append new OccurrenceNode.          │
+            │        word_record->n++                                                     │
+            │        Incremented because this is a repeat occurrence of an existing word. │
+            │                                                                             │
+            │  • otherwise: probe = (probe + 1) % bucket_count  — keep scanning           │
+            └─────────────────────────────────────────────────────────────────────────────┘
+
+            WordRecord::n INVARIANT ACROSS ALL CASES
+            ─────────────────────────────────────────
+            word_record->n  ==  length of word_record->head linked list
+
+            This holds at all times because n is incremented in exactly the same
+            cases where a new OccurrenceNode is appended to the list:
+
+                Case A  — new word:                 n = 1,  list length = 1   ✓
+                Case B  — repeat, direct match:     n++,    list appended     ✓
+                Case D  — new word, displaced:      n = 1,  list length = 1   ✓
+                Case C  — repeat, probe match:      n++,    list appended     ✓
+
+            The consequence is that Corpus::probability() and Corpus::frequency()
+            are O(1) — no list traversal is ever needed:
+
+                frequency(word_id)   = word_record->n
+                probability(word_id) = (double)word_record->n / (double)tables->total_tokens
+
+
+            NOTE ON COLLISION SAFETY
+            ────────────────────────
+            The load factor threshold (KEYS_LOAD_FACTOR_THRESHOLD) keeps bucket_used well
+            below bucket_count, which keeps probe chains short on average.  However, the
+            load factor only reduces collision *probability* — it does not eliminate it.
+            Two distinct words can always hash to the same bucket regardless of load factor.
+            The word-comparison checks in Cases B and C are therefore mandatory correctness
+            logic, not optional optimisations.
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            REHASHING
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            Triggered after every insertion when:
+                (double)bucket_used / (double)bucket_count  >  KEYS_LOAD_FACTOR_THRESHOLD
+
+            Procedure:
+                1.  bucket_count = Keys::next_prime(bucket_count)   — grow to next prime
+                2.  Allocate new_hash_table[bucket_count]() and new_index_table[bucket_count]()
+                3.  For every occupied slot i in the old table:
                     new_key = generate_key(hash_table[i]->word, bucket_count)
                     if new_hash_table[new_key] == nullptr:
                         place directly, update new_index_table[word_id] = new_key
                     else:
                         linear probe in new table for empty slot,
                         update new_index_table[word_id] = probe
-            4.  delete[] hash_table  and  delete[] index_table   (arrays only)
-            5.  hash_table  = new_hash_table
-                index_table = new_index_table
- 
-        CRITICAL: Only the bucket arrays are freed.  WordRecord and OccurrenceNode
-        objects live on the heap independently.  Their pointers are simply copied into
-        the new arrays.  All occurrence linked lists survive rehash completely intact.
- 
-        Prime-sized tables distribute hash keys more uniformly, reducing the likelihood
-        of systematic clustering from any particular hash function.
+                4.  delete[] hash_table  and  delete[] index_table   (arrays only)
+                5.  hash_table  = new_hash_table
+                    index_table = new_index_table
 
-        CRITICAL: Only the bucket arrays are freed.  WordRecord and OccurrenceNode
-        objects live on the heap independently.  Their pointers are simply copied into
-        the new arrays.  All occurrence linked lists survive rehash completely intact.
-        LINE and TOKEN linked lists are entirely unaffected by rehash — they hold
-        word_id and OccurrenceNode* values, neither of which is a bucket index.
-  
-        ════════════════════════════════════════════════════════════════════════════════════
-        LINE / TOKEN COUNTERS
-        ════════════════════════════════════════════════════════════════════════════════════
- 
-        line_number   — global, incremented once per line, never reset during the build.
-                        Stored in OccurrenceNode to identify which line the token is on.
- 
-        token_number  — local to each line, reset to 0 at the end of every line.
-                        Stored in OccurrenceNode to identify the token's position within
-                        its line.  It is NOT a global corpus-wide token counter.
- 
-        mxntpl / mnntpl — track the longest and shortest lines (in tokens) seen so far,
-                          stored in TABLES::maximum_tokens_per_line and
-                          TABLES::minimum_tokens_per_line respectively.
- 
- 
-        ════════════════════════════════════════════════════════════════════════════════════
-        INVARIANTS
-        ════════════════════════════════════════════════════════════════════════════════════
- 
-        •  bucket_used < bucket_count at all times
-               Enforced by the load factor check.  Guarantees at least one empty slot
-               always exists so that linear probing always terminates.
- 
-        •  index_table[word_id] always points to the actual bucket of that word
-               Maintained by storing probe (not key) when a word is displaced.
- 
-        •  word_id values are dense in [0, bucket_used)
-               Enables direct use as row indices into the embedding matrix E[vocab_size × d_model].
- 
-        •  hash_table is zero-initialised on every allocation (the () matters)
-               nullptr is the only sentinel for "bucket is empty".
- 
-        •  Occurrence lists are always in corpus order
-               New nodes are always appended to the tail.
- 
-        •  WordRecord and OccurrenceNode are never freed during rehash
-               Only arrays are reallocated.  Heap objects are stable for the lifetime
-               of the TABLES structure.
+                CRITICAL: Only the bucket arrays are freed.  WordRecord and OccurrenceNode
+                objects live on the heap independently.  Their pointers are simply copied into
+                the new arrays.  All occurrence linked lists survive rehash completely intact.
+                WordRecord::n is stored inside the WordRecord object on the heap — it is
+                unaffected by rehash and retains its accumulated count across all rehash cycles.
+                LINE and TOKEN linked lists are entirely unaffected by rehash — they hold
+                word_id and OccurrenceNode* values, neither of which is a bucket index.
 
-        •  LINE list length == line_number at end of build
-               One LINE node is allocated per corpus line, in order.
+                Prime-sized tables distribute hash keys more uniformly, reducing the likelihood
+                of systematic clustering from any particular hash function.
 
-        •  TOKEN list length for each LINE == LINE::n
-               Incremented exactly once per token at the top of the token loop.
-               No branch inside the loop touches LINE::n.               
-  
-        ════════════════════════════════════════════════════════════════════════════════════
-        CONNECTION TO THE TRANSFORMER
-        ════════════════════════════════════════════════════════════════════════════════════
- 
-        At the end of the build:
-            bucket_used == vocab_size
- 
-        The word_id of each WordRecord is the token's permanent index into the embedding
-        matrix E of shape [vocab_size × d_model]:
-            embedding(token) = E[word_id]     ← O(1) row lookup
- 
-        The hash table provides:
-            token string  →  word_id          O(1) average,  used at encode time
-            word_id       →  token string     O(1),          used at decode time
 
-        The lines linked list provides:
-            corpus position  →  TOKEN node  →  token_id + occurrence   O(n) traversal
-            Enables sequence reconstruction needed for positional encoding and
-            attention mask generation without re-reading the file.    
- 
-        See TABLES.md for full documentation including memory layout diagrams.
-          
-        RETURNS
-        -------
-        TABLES*  — heap-allocated, ref_count = 1, ownership transfers to caller.
-                   Contains hash_to_word_record, word_id_to_hash, and lines —
-                   the complete vocabulary table and corpus layout.
- 
-        THROWS
-        ------
-        std::runtime_error  — wraps std::bad_alloc if any heap allocation fails.
-                              All partially-allocated objects are cleaned up before
-                              the exception propagates.
+                ════════════════════════════════════════════════════════════════════════════════════
+                LINE / TOKEN COUNTERS
+                ════════════════════════════════════════════════════════════════════════════════════
+
+                line_number   — global, incremented once per line, never reset during the build.
+                                Stored in OccurrenceNode to identify which line the token is on.
+
+                token_number  — local to each line, reset to 0 at the end of every line.
+                                Stored in OccurrenceNode to identify the token's position within
+                                its line.  It is NOT a global corpus-wide token counter.
+
+                mxntpl / mnntpl — track the longest and shortest lines (in tokens) seen so far,
+                                  stored in TABLES::maximum_tokens_per_line and
+                                  TABLES::minimum_tokens_per_line respectively.
+
+
+                ════════════════════════════════════════════════════════════════════════════════════
+                INVARIANTS
+                ════════════════════════════════════════════════════════════════════════════════════
+
+                -  bucket_used < bucket_count at all times
+                   Enforced by the load factor check.  Guarantees at least one empty slot
+                   always exists so that linear probing always terminates.
+
+                -  index_table[word_id] always points to the actual bucket of that word
+                   Maintained by storing probe (not key) when a word is displaced.
+
+                -  word_id values are dense in [0, bucket_used)
+                   Enables direct use as row indices into the embedding matrix E[vocab_size × d_model].
+
+                -  hash_table is zero-initialised on every allocation (the () matters)
+                   nullptr is the only sentinel for "bucket is empty".
+
+                -  Occurrence lists are always in corpus order
+                   New nodes are always appended to the tail.
+
+                -  WordRecord::n always equals the length of WordRecord::head linked list
+                   Initialised to 1 in Cases A and D (new word).
+                   Incremented by 1 in Cases B and C (repeat occurrence).
+                   Never modified during rehash — the WordRecord object does not move.
+                   Consequence: frequency and probability queries are O(1).
+
+                -  WordRecord and OccurrenceNode are never freed during rehash
+                   Only arrays are reallocated.  Heap objects are stable for the lifetime
+                   of the TABLES structure.
+
+                -  LINE list length == line_number at end of build
+                   One LINE node is allocated per corpus line, in order.
+
+                -  TOKEN list length for each LINE == LINE::n
+                   Incremented exactly once per token at the top of the token loop.
+                   No branch inside the loop touches LINE::n.
+
+
+                ════════════════════════════════════════════════════════════════════════════════════
+                CONNECTION TO THE TRANSFORMER
+                ════════════════════════════════════════════════════════════════════════════════════
+
+                At the end of the build:
+                    bucket_used == vocab_size
+
+                The word_id of each WordRecord is the token's permanent index into the embedding
+                matrix E of shape [vocab_size × d_model]:
+                    embedding(token) = E[word_id]     ← O(1) row lookup
+
+                The hash table provides:
+                    token string  →  word_id          O(1) average,  used at encode time
+                    word_id       →  token string     O(1),          used at decode time
+
+                WordRecord::n provides:
+                    word_id  →  frequency             O(1),  used for probability, subsampling,
+                                                      negative sampling weight in Skip-gram
+
+                The lines linked list provides:
+                    corpus position  →  TOKEN node  →  token_id + occurrence   O(n) traversal
+                    Enables sequence reconstruction needed for positional encoding and
+                    attention mask generation without re-reading the file.
+
+                See TABLES.md for full documentation including memory layout diagrams.
+
+                RETURNS
+                -------
+                TABLES*  — heap-allocated, ref_count = 1, ownership transfers to caller.
+                           Contains hash_to_word_record, word_id_to_hash, and lines —
+                           the complete vocabulary table and corpus layout.
+
+                THROWS
+                ------
+                std::runtime_error  — wraps std::bad_alloc if any heap allocation fails.
+                                      All partially-allocated objects are cleaned up before
+                                      the exception propagates.
          */
         TABLES* build_hash_table(void)
         {
@@ -458,7 +501,7 @@ class Parser
                     OccurrenceNode* occurrence = nullptr;
                     WordRecord* word_record = nullptr;
 
-                    // CASE A: bucket empty → new word
+                    // CASE A: bucket empty → new word, direct natural bucket placement
                     if (hash_table[key] == nullptr) // If the bucket is empty, it means the token/word is new
                     {
                         //std::cout<< "New bucket created for " << token << " at line " << line_number << " and token " << token_number << std::endl; 
@@ -505,7 +548,7 @@ class Parser
                             size_t probe = (key + 1) % bucket_count;
                             while (probe != key)
                             {
-                                // Case D — empty bucket during probe — new word displaced from natural bucket
+                                // Case D — empty bucket during probe — new word displaced from natural bucket to a probed bucket
                                 if (hash_table[probe] == nullptr)
                                 {
                                     // Found empty slot — treat as new word
@@ -540,7 +583,7 @@ class Parser
                                     bucket_used++;
                                     break;
                                 }
-                                // Case C  (probe match) — same word, displaced from natural bucket                                
+                                // Case C  (probe match) — same repeated word, displaced from natural bucket to probed bucket                               
                                 else if (hash_table[probe]->word == token)
                                 {
                                     // Found the actual matching word
@@ -576,7 +619,7 @@ class Parser
                         }
                         else
                         {
-                            // Case B — same word (direct match), no collision                            
+                            // Case B — Same repeated word (direct match), no collision and went to natural bucket and not displaced                           
                             word_record = hash_table[key];
 
                             occurrence = word_record->head; // Get the head of the linked list

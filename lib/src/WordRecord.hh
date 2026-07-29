@@ -86,6 +86,7 @@ struct Lines_new
     {
     }
 };
+
 typedef struct Lines_new LINES_NEW;
 
 struct words
@@ -103,7 +104,6 @@ struct words
 };
 
 typedef words WORDS;
-
 
 struct WordRecord
 {

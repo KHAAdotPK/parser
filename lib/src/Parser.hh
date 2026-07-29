@@ -6,8 +6,6 @@
 #ifndef CSV_PARSER_LIB_PARSER_HH
 #define CSV_PARSER_LIB_PARSER_HH
 
-#define TOKEN_ID_ORIGINATE_AT_VALUE 1
-
 /*
     Include parser-level structures.
     Explicitly include headers where a file specifically relies on a type
@@ -59,13 +57,9 @@ class Parser
      * When this ratio exceeds KEYS_LOAD_FACTOR_THRESHOLD, the hash table
      * is rehashed and bucket_count is updated to the next suitable prime.
      */
-    // size_t buckets_used;
 
-    /*WordRecord** hash_table;
-    size_t* index_table; 
-    size_t line_number;
-    size_t token_number;*/
-
+     public:
+        
         void free_tables(const size_t* index_table, WordRecord** hash_table, LINE* line_head, size_t bucket_used) 
         {   
             std::cout<< "BUCKET USED = " << bucket_used << std::endl;
@@ -104,7 +98,6 @@ class Parser
                     w_rec->n = 0;
                 }
             }
-
             
             while (line_head != nullptr)
             {
@@ -119,10 +112,53 @@ class Parser
                 delete line_head;
                 line_head = next_line;
             }
-        }  
+        }
 
-    public:
+        /**
+         * @brief Frees the memory allocated for the hash table and lines array.
+         * @param hash_table Pointer to the hash table.
+         * @param lines_array Pointer to the array of lines.
+         */
+        void free_tables_very_new(WordRecord_new** hash_table, WORDS** lines_array)
+        {
+            for (size_t i = 0; i < get_bucket_count(); i++)
+            {
+                WordRecord_new* record = hash_table[i];
 
+                if (record != nullptr)
+                {            
+                    delete record;
+                    hash_table[i] = nullptr;               
+                }
+            }
+
+            delete hash_table;
+
+            hash_table = nullptr;
+
+            for (size_t i = 0; i < get_nol(); i++)
+            {
+                WORDS* line = lines_array[i];
+
+                if (line != nullptr)
+                {
+                    if (line->keys != nullptr)
+                    {
+                        delete line->keys;
+                        line->keys = nullptr;
+                    }
+
+                    delete line;
+
+                    lines_array[i] = nullptr;
+                }       
+            }
+
+            delete lines_array;
+
+            lines_array = nullptr;
+        }
+    
         // Constructors
         Parser() : _ifile_name(), _ifile(), _is_open(false), bucket_count(0), bucket_used(0), mxntpl(0), mnntpl(std::numeric_limits<size_t>::max()), nol(0), tnt(0)  /*,bucket_count(size_t(KEYS_COMMON_STARTING_SIZE)), buckets_used(0),*/ /*hash_table(nullptr), index_table(nullptr), line_number(0), token_number(0)*/   
         {
@@ -315,7 +351,267 @@ class Parser
         }
 
         /*
-            kEEP THIS VARIENT REMOVE EVERY OTHER VARIANT
+            ╔══════════════════════════════════════════════════════════════════════════════════╗
+            ║                             build_hash_table_very_new()                          ║
+            ║    → Will be renamed to build_hash_table(), replacing the current method         ║
+            ╚══════════════════════════════════════════════════════════════════════════════════╝
+
+            PURPOSE
+            -------
+            Iterates over the entire corpus once and builds a vocabulary hash table of unique
+            tokens.  Each unique token is assigned a permanent word ID and stored in a hash
+            table with linear probing for collision resolution.  This is an optimised version
+            designed for efficient vocabulary extraction without the overhead of storing per-token
+            occurrence records.
+
+            Unlike the original build_hash_table(), this function:
+            • Focuses solely on building the vocabulary (hash table of unique words)
+            • Uses linear probing with bucket reallocation for collision management
+            • Automatically rehashes when load factor exceeds the threshold
+            • Returns only the hash table of WordRecord objects, not the full TABLES structure
+            • Tracks essential corpus statistics (bucket_count, bucket_used, token counts)
+            • Is more cache-efficient for vocabulary construction
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            DATA STRUCTURES PRODUCED
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            hash_table   (WordRecord_new*[bucket_count])
+            ────────────────────────────────────────────
+            Dynamically allocated flat array of pointers.  Index = hash key computed via
+            Keys::generate_key(token, bucket_count).  Each non-null slot points to a
+            WordRecord_new on the heap:
+
+            WordRecord_new
+            ├── word_id     → size_t          dense sequential ID, offset by TOKEN_ID_ORIGINATE_AT_VALUE
+            ├── word        → string          the token string itself
+            ├── n           → size_t          total count of occurrences in corpus
+            │                                Initialised to 1 on first insertion (Cases A and D)
+            │                                Incremented by 1 on every subsequent occurrence (Cases B and C)
+            └── head        → OccurrenceNode* (not used in this implementation; left for compatibility)
+
+            bucket_count
+            ────────────
+            The current capacity of the hash table.  Starts at KEYS_COMMON_STARTING_SIZE
+            (a prime, typically 1009) to minimise clustering.  Increases dynamically via
+            Keys::next_prime() when load factor exceeds KEYS_LOAD_FACTOR_THRESHOLD.
+
+            bucket_used
+            ───────────
+            The number of distinct unique words encountered so far.  Incremented once per
+            unique word.  Used to compute word_id (via bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE)
+            and to track load factor.
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            ALGORITHM — TOKEN PROCESSING (four cases per token)
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            key = Keys::generate_key(token, bucket_count)
+
+            ┌─────────────────────────────────────────────────────────────────────────────┐
+            │ CASE A │ hash_table[key] == nullptr          (bucket empty → new word)      │
+            ├─────────────────────────────────────────────────────────────────────────────┤
+            │  1. Allocate WordRecord_new(word_id=bucket_used+TOKEN_ID_ORIGINATE_AT_VALUE, │
+            │     word=token, n=1)                                                        │
+            │  2. hash_table[key] = word_record                                           │
+            │  3. bucket_used++                                                           │
+            └─────────────────────────────────────────────────────────────────────────────┘
+
+            ┌─────────────────────────────────────────────────────────────────────────────┐
+            │ CASE B │ hash_table[key]->word == token      (direct match, no collision)   │
+            ├─────────────────────────────────────────────────────────────────────────────┤
+            │  1. word_record = hash_table[key]                                           │
+            │  2. word_record->n++                                                        │
+            │     bucket_used is NOT incremented — word already registered.               │
+            └─────────────────────────────────────────────────────────────────────────────┘
+
+            ┌─────────────────────────────────────────────────────────────────────────────┐
+            │ CASE C │ hash_table[key]->word != token      (hash collision, word in table)│
+            ├─────────────────────────────────────────────────────────────────────────────┤
+            │  Linear probe:  probe = (key + 1) % bucket_count until:                     │
+            │  • hash_table[probe] == nullptr         → CASE D (displaced insertion)      │
+            │  • hash_table[probe]->word == token     → existing word found, n++          │
+            │  bucket_used is NOT incremented — word already registered.                  │
+            └─────────────────────────────────────────────────────────────────────────────┘
+
+            ┌─────────────────────────────────────────────────────────────────────────────┐
+            │ CASE D │ During probe: hash_table[probe] == nullptr (displaced new word)    │
+            ├─────────────────────────────────────────────────────────────────────────────┤
+            │  1. Allocate WordRecord_new(word_id=bucket_used+TOKEN_ID_ORIGINATE_AT_VALUE, │
+            │     word=token, n=1)                                                        │
+            │  2. hash_table[probe] = word_record                                         │
+            │  3. bucket_used++                                                           │
+            │     Exit linear probe loop.                                                 │
+            └─────────────────────────────────────────────────────────────────────────────┘
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            DYNAMIC REHASHING
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            After every token insertion, the load factor is checked:
+
+                load_factor = bucket_used / bucket_count
+
+            If load_factor > KEYS_LOAD_FACTOR_THRESHOLD:
+
+            1. Compute new_bucket_count = Keys::next_prime(bucket_count)
+            2. Allocate new_hash_table[new_bucket_count]()
+            3. Rehash all existing entries from old table into new table:
+               • For each non-null slot in old table:
+                 - Compute new hash key in the context of new_bucket_count
+                 - Use linear probing to find an empty slot in new table
+                 - Insert WordRecord* (pointer is moved, not copied)
+            4. Delete old hash table
+            5. Point hash_table to new_hash_table
+            6. Update bucket_count
+            7. bucket_used remains unchanged — rehashing does not create new words
+
+            This ensures that the load factor never exceeds the threshold, maintaining
+            O(1) average-case lookup and O(1) average-case insertion.
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            CORPUS STATISTICS
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            mxntpl (Maximum number of tokens per line)
+            ──────────────────────────────────────────
+            Tracks the longest line (by token count) in the corpus. Updated whenever a token
+            length exceeds the current maximum. Used for memory pre-allocation and sizing.
+
+            mnntpl (Minimum number of tokens per line)
+            ──────────────────────────────────────────
+            Tracks the shortest line in the corpus. Initialised to std::numeric_limits<size_t>::max().
+            Updated whenever a token length is less than the current minimum.
+
+            nol (Number of lines)
+            ────────────────────
+            Incremented once per line processed. At the end of the function, this equals the
+            total number of lines in the corpus.
+
+            tnt (Total number of tokens)
+            ───────────────────────────
+            Incremented for every token (including duplicates). Differs from bucket_used,
+            which counts only unique words. tnt is the total token count across all lines.
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            PARAMETERS
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            (none) — function is parameterless.  Operates on the internal file stream
+            and member variables (bucket_count, bucket_used, nol, tnt, mxntpl, mnntpl).
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            RETURN VALUE
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            WordRecord_new** — heap-allocated hash table of vocabulary.  Size = bucket_count.
+            Ownership transfers to the caller.  All WordRecord_new* pointers within the array
+            point to heap-allocated objects that are owned by the caller.
+
+            The function also updates the following member variables as a side effect:
+                • this->bucket_count  → final hash table size
+                • this->bucket_used   → number of unique words
+                • this->nol           → total lines in corpus
+                • this->tnt           → total tokens in corpus
+                • this->mxntpl        → maximum tokens per line
+                • this->mnntpl        → minimum tokens per line
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            INVARIANTS
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            • load_factor ≤ KEYS_LOAD_FACTOR_THRESHOLD throughout execution
+              (rehashing ensures this is always satisfied).
+
+            • bucket_used ≤ bucket_count (there is always at least one empty bucket,
+              guaranteed by the load factor invariant).
+
+            • Every non-null entry hash_table[i] has a valid WordRecord_new* with:
+              - word_id = (original bucket_used at insertion) + TOKEN_ID_ORIGINATE_AT_VALUE
+              - n ≥ 1 (every word appears at least once)
+              - word is a non-empty string
+
+            • Empty tokens (zero-length strings) are skipped and do not contribute to
+              bucket_used, tnt, or any statistics.
+
+            • The order of insertion does not affect the final result; only the set of
+              unique words and their frequencies matter.
+
+            • After the function returns, the input file stream is at the beginning
+              (via reset()).  The caller can iterate over the corpus again.
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            PERFORMANCE
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            Time Complexity:
+            • Average case:  O(T) where T = total tokens in corpus
+              (each token takes O(1) average time for hashing, lookup, and insertion)
+
+            • Worst case:    O(T · log(V)) where V = unique words
+              (only if rehashing occurs many times with very poor hash distribution,
+               but with linear probing and suitable primes, collisions are minimal)
+
+            Space Complexity:
+            • O(V) for the hash table and WordRecord objects
+              (V = unique words; typically much smaller than T)
+
+            • Rehashing temporarily allocates a new table during the rebuild, so peak
+              space can be 2·V for a brief moment.
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            THROWS
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            • std::runtime_error — wraps std::bad_alloc if any heap allocation fails.
+              The error message identifies the operation that failed (hash table allocation,
+              WordRecord allocation, or rehashing).  Partial cleanup is performed where
+              possible; however, if an exception is raised after some allocations succeed,
+              the hash table may be left in an inconsistent state and should not be used.
+
+            • No exceptions are thrown due to invalid input (e.g., empty corpus); the
+              function will simply return an empty hash table (bucket_used = 0).
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            USAGE EXAMPLE
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            Parser parser("corpus.txt");
+            WordRecord_new** vocab = parser.build_hash_table_very_new();
+
+            // vocab[key] points to WordRecord_new for the word at hash key 'key'
+            // parser.bucket_used now contains the number of unique words
+            // parser.tnt now contains the total number of tokens
+
+            // Caller is responsible for freeing:
+            for (size_t i = 0; i < parser.bucket_count; ++i) {
+                if (vocab[i] != nullptr) {
+                    delete vocab[i];
+                }
+            }
+            delete[] vocab;
+
+
+            ════════════════════════════════════════════════════════════════════════════════════
+            DIFFERENCES FROM ORIGINAL build_hash_table()
+            ════════════════════════════════════════════════════════════════════════════════════
+
+            • Returns only the hash table (WordRecord_new**), not the full TABLES structure.
+            • Does not build LINE/TOKEN linked lists (removes massive allocation overhead).
+            • Does not store occurrence nodes; tracks only word frequency (n).
+            • Simpler memory footprint — fewer heap allocations per word.
+            • Faster construction due to reduced bookkeeping.
+            • Uses WordRecord_new instead of WordRecord for potential type compatibility.
          */
         WordRecord_new** build_hash_table_very_new(void)
         {
@@ -510,8 +806,285 @@ class Parser
         }
 
         /*
-         * Build hash table with checkpoints to verify correctness
-         */
+            ╔══════════════════════════════════════════════════════════════════════════════════╗
+            ║                    build_hash_table_with_checkpoints()                          ║
+            ╚══════════════════════════════════════════════════════════════════════════════════╝
+
+            PURPOSE
+            -------
+            Builds the vocabulary table (TABLES) from the corpus, with built‑in support for
+            incremental checkpointing and resumption.  This function is designed to handle
+            very large corpora where a single pass may be interrupted (power loss, signal,
+            user interrupt) — by periodically serialising the current state to disk, the
+            build can be resumed from the last checkpoint without re‑parsing the entire
+            corpus.
+
+            This function is a superset of `build_hash_table()`: it performs the same
+            construction of `hash_to_word_record`, `word_id_to_hash`, and the `lines`
+            linked list, but adds the ability to:
+
+            1. Resume from a previously saved checkpoint by passing a `TABLES*` object
+               that was deserialised from a checkpoint file (or from the final file).
+
+            2. Write intermediate checkpoints at regular line intervals (configured by
+               `CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL`).
+
+            3. Write a final checkpoint upon successful completion (to
+               `CORPUS_SERIALIZATION_FINAL_FILENAME`).
+
+            The function’s return behaviour depends on the compilation flag
+            `CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL`:
+
+            • If > 0 (checkpointing enabled):
+              The function writes the final checkpoint and returns `nullptr`.
+              The caller is expected to use the serialised file to obtain the
+              `TABLES` object (e.g., by calling `Serialisation::read_tables()`).
+              This avoids passing a large heap object back through the stack.
+
+            • If == 0 (checkpointing disabled):
+              Behaves exactly like `build_hash_table()` and returns the heap‑allocated
+              `TABLES*` with `ref_count = 1`; ownership transfers to the caller.
+
+            See the documentation for `build_hash_table()` for the full details of the
+            data structures, token processing (Cases A‑D), rehashing, and invariants.
+            This function reuses all that logic; the following sections focus on the
+            additional behaviour specific to checkpoints and resumption.
+
+
+            ═══════════════════════════════════════════════════════════════════════════════════
+            PARAMETERS
+            ═══════════════════════════════════════════════════════════════════════════════════
+
+            TABLES* tables = nullptr
+            ────────────────────────
+            If `nullptr`, starts a fresh build from scratch.
+            If non‑null, must point to a valid `TABLES` object that was previously
+            deserialised from a checkpoint.  The function reuses the existing:
+                • hash_table    (tables->hash_to_word_record)
+                • index_table   (tables->word_id_to_hash)
+                • lines         (tables->lines)
+                • bucket_count  (tables->bucket_count)
+                • bucket_used   (tables->bucket_used)
+                • mxntpl / mnntpl / tnt
+            and resumes processing from the next line after the last one that was
+            already recorded in the checkpoint.
+
+            HEADER* h = nullptr
+            ────────────────────
+            Optional pointer to a `HEADER` structure that stores the line count
+            (`h->line_count`) of the last completed checkpoint.  When resuming, the
+            function skips all lines with `line_number < h->line_count`, so that only
+            new lines are processed.  If `h` is `nullptr`, the function assumes the
+            entire corpus must be processed (i.e., no checkpoint exists).
+
+            The `HEADER` structure is typically the metadata read from the checkpoint
+            file itself, or from a separate “resume” file.
+
+            These parameters are intended to be used together: `tables` provides the
+            existing vocabulary state, and `h` tells the function where to start
+            processing new lines.
+
+
+            ═══════════════════════════════════════════════════════════════════════════════════
+            RESUMPTION LOGIC
+            ═══════════════════════════════════════════════════════════════════════════════════
+
+            When `tables != nullptr`:
+
+            1. The function retrieves all internal data structures from the provided
+               `TABLES` object (hash table, index table, line list head/tail, bucket
+               counts, mxntpl/mnntpl/tnt, etc.).
+
+            2. It traverses the existing line list to find its tail (`lines_tail`),
+               so that new `LINE` nodes can be appended correctly.
+
+            3. It uses `starting_line = h->line_count` to skip lines that have already
+               been processed in the previous session.  For each line in the corpus:
+
+               if (line_number < starting_line)
+               {
+                   line_number++;
+                   continue;
+               }
+
+               This ensures that lines already represented in the checkpoint are not
+               re‑parsed.  Word records and occurrence lists for those lines are
+               already present in the `TABLES` object; no duplicate entries are created.
+
+            4. For each token in the new lines, the standard four‑case insertion
+               logic applies, exactly as in `build_hash_table()`.  However, an
+               important subtlety arises for words that existed before the checkpoint
+               but whose occurrence list was partially truncated (see below).
+
+
+            ═══════════════════════════════════════════════════════════════════════════════════
+            CHECKPOINTING — WRITE AND RESUME CONSISTENCY
+            ═══════════════════════════════════════════════════════════════════════════════════
+
+            When a checkpoint is written (both intermediate and final), the `TABLES`
+            structure is serialised exactly as it stands.  The `HEADER` (or the checkpoint
+            file’s own metadata) records:
+
+                • `line_count`         — the number of lines that have been fully processed
+                • `bucket_used`        — the number of distinct words seen so far
+                • (implicit) the state of every `WordRecord` and `OccurrenceNode`.
+
+            On resumption, the `WordRecord` objects have their `head` and `n` fields
+            preserved.  For words that already existed, their occurrence lists are
+            complete up to the last processed line.  When we process a new occurrence of
+            an already‑existing word, we simply append to the existing list — no special
+            handling is needed for the *normal* case.
+
+            HOWEVER, there is one edge case: a word that existed *before* the checkpoint
+            may have had **all its occurrences** in lines that were already processed.
+            In the checkpoint file, its `WordRecord::head` will be non‑null and
+            `WordRecord::n` will equal the number of occurrences.  When we resume and
+            process a new line that contains that word, we simply append a new
+            `OccurrenceNode` and increment `n`.  That works fine.
+
+            But if the checkpoint was written **exactly after the last occurrence of a
+            word** and that word never appears again, then on resumption we will
+            encounter the word again only in a new line — that is a new occurrence, so
+            appending is correct.
+
+            The code guards against an inconsistent state where `head == nullptr && n == 0`
+            yet the word is present in the table — this could happen if a checkpoint was
+            taken before any occurrence of that word was recorded (impossible, because the
+            word is only added when its first occurrence is seen).  The guard is present
+            to handle the case where the checkpoint was taken at a point where a word
+            exists in the hash table (from a previous session) but we are resuming and
+            the word has not yet been seen in the new session (i.e., its occurrence list
+            is empty because the checkpoint was taken before any occurrence was written?).
+
+            Actually, the code contains a special handling when resuming:
+
+            if (current->head == nullptr && current->n == 0) 
+            {
+                // All previous occurrences were already recorded in the file? 
+                // This branch treats the word as if it is being seen for the first time
+                // in the current session, and creates a new head with n=1.
+            }
+
+            This branch is likely intended to handle the resumption case where a word
+            was present in the hash table from the checkpoint but its occurrence list
+            was **not** saved (perhaps because the checkpoint was taken before the word’s
+            first occurrence was written?  That would be inconsistent).  The original
+            `build_hash_table()` never has `head == nullptr && n == 0` because n is
+            always set to 1 on first insertion.  In a checkpoint, if the word was
+            serialised, its `head` and `n` would have been saved.  So this branch may
+            be defensive or for a specific serialisation format that drops occurrence
+            lists.  Nonetheless, the comment block should note that the function handles
+            such a state by re‑initialising the occurrence list for that word.
+
+            In practice, the checkpoint serialisation should save the entire `WordRecord`
+            including `head` and `n`, so this branch should rarely be taken.  But the
+            documentation should mention that the function is robust to that scenario.
+
+            The checkpoint writing occurs:
+
+            • At the end of every line where `line_number % CHECKPOINT_INTERVAL == 0`
+                (an intermediate checkpoint).
+
+            • At the end of the function (a final checkpoint) when checkpointing is
+                enabled.
+
+            When checkpointing is enabled, the function does **not** return the `TABLES*`
+            object; it writes the final checkpoint and returns `nullptr`.  The caller is
+            expected to read the final checkpoint file to obtain the completed `TABLES`
+            structure.  This design simplifies memory management when checkpoints are
+            active.
+
+
+            ═══════════════════════════════════════════════════════════════════════════════════
+            DIFFERENCES FROM build_hash_table()
+            ═══════════════════════════════════════════════════════════════════════════════════
+
+            • Supports resumption via `tables` and `h`.
+
+            • When resuming, lines before `starting_line` are skipped.
+
+            • The `WordRecord::word_id` is offset by `TOKEN_ID_ORIGINATE_AT_VALUE`
+                (likely to reserve ID 0 for a special token such as <PAD> or <UNK>).
+                This is a difference in the base implementation; in `build_hash_table()`
+                the word_id starts at 0 (or bucket_used).  Here, the offset is applied
+                when creating a new `WordRecord`.
+
+            • The `OccurrenceNode*` is **not** stored in the `TOKEN` node
+                (`tokens->occurrence` is never set).  This is a deviation from the
+                original; the reason might be to reduce memory overhead or because the
+                occurrence lists are only needed for the word records, not per token.
+                The documentation should note that the `TOKEN` structure still stores
+                `token_id`, but the occurrence pointer is left null.  (The code comments
+                out assignments to `tokens->occurrence`.)
+
+            • Returns `nullptr` when checkpoints are enabled, otherwise returns the
+                `TABLES*` as usual.
+
+            • Contains an extra `read_tables()` call inside the checkpoint block
+                (commented out) — likely for debugging; not part of the production flow.
+
+            All other aspects — hash table structure, rehashing, load factor, line/token
+            counters, and invariants — remain identical to `build_hash_table()`.
+
+
+            ═══════════════════════════════════════════════════════════════════════════════════
+            INVARIANTS (additional to those of build_hash_table())
+            ═══════════════════════════════════════════════════════════════════════════════════
+
+            • When resuming, `starting_line <= line_number` at the point where
+                processing begins.  All lines with `line_number < starting_line` are
+                skipped and their tokens are **not** processed.
+
+            • The existing `TABLES` object must be consistent with the `HEADER`:
+                `h->line_count` should equal the number of lines that are already
+                represented in `tables->lines`.  The function does not verify this;
+                it is the caller’s responsibility to ensure consistency.
+
+            • The `tables` object must have `ref_count >= 1`; the function does not
+                modify `ref_count` (it sets it to 1 when building from scratch).
+
+            • When checkpointing is enabled, the final checkpoint is written, and
+                the function returns `nullptr`.  The original `TABLES` object’s memory
+                is not freed; it is the caller’s responsibility to free it after reading
+                the checkpoint (or the checkpoint file can be used to reconstruct it).
+
+
+            ═══════════════════════════════════════════════════════════════════════════════════
+            RETURNS
+            ═══════════════════════════════════════════════════════════════════════════════════
+
+            • If `CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL > 0`:
+                `nullptr` — the completed `TABLES` structure has been serialised to
+                the final checkpoint file.  The caller must read that file to obtain
+                the vocabulary and corpus layout.
+
+            • If `CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL == 0`:
+                `TABLES*` — heap‑allocated, `ref_count = 1`, ownership transfers to
+                the caller.  The structure contains the complete vocabulary table
+                and corpus layout.
+
+            ═══════════════════════════════════════════════════════════════════════════════════
+            THROWS
+            ═══════════════════════════════════════════════════════════════════════════════════
+
+            • `std::runtime_error` — wraps `std::bad_alloc` if any heap allocation fails.
+                Partial cleanup is performed for allocations made during token processing;
+                however, if an allocation fails after some structures have been allocated,
+                no full rollback is performed — the caller should treat the `TABLES` object
+                as invalid if an exception escapes.
+
+            • Exceptions from the serialisation library (`Serialisation::save_tables`)
+                are caught and written to `std::cerr` (in the current implementation),
+                but they do not cause the function to throw.  This behaviour is noted
+                in the code but may be changed in future versions.
+
+            SEE ALSO
+            ═══════════════════════════════════════════════════════════════════════════════════
+
+            • `build_hash_table()` — the base implementation without checkpointing.
+
+            • `Serialisation` — for reading/writing checkpoint files.
+        */
         TABLES* build_hash_table_with_checkpoints(TABLES* tables = nullptr, HEADER* h = nullptr) 
         {
             // Linked list of lines in the corpus. Each line contains an array of tokens in that line.
@@ -1386,9 +1959,11 @@ class Parser
 
                 THROWS
                 ------
-                std::runtime_error  — wraps std::bad_alloc if any heap allocation fails.
-                                      All partially-allocated objects are cleaned up before
-                                      the exception propagates.
+                std::runtime_error — wraps std::bad_alloc if any heap allocation fails.
+                                     Partial cleanup is performed for allocations made inside the token‑processing loop; however,
+                                     the function does not implement a full transactional rollback for previously allocated structures
+                                     (e.g., hash buckets, line nodes). If such a failure occurs, the caller should treat the TABLES
+                                     object as invalid and not use it.                                      
          */
         TABLES* build_hash_table(void)
         {

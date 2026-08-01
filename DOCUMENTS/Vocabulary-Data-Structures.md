@@ -1,6 +1,6 @@
 # Vocabulary data structures in the current parser flow
 
-This note traces the journey in [usage/main.cu](../../usage/main.cu) and focuses on the data structures that are created and consumed while building the vocabulary and later training inputs.
+This note traces the journey in [main.cu](./main.cu.txt) and focuses on the data structures that are created and consumed while building the vocabulary and later training inputs.
 
 ## 1. Starting point: the corpus parser
 

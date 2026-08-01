@@ -1,0 +1,270 @@
+/*
+ * usage/main.cu
+ * Q@hackers.pk
+ */
+
+#include "main.hh"
+
+int main(int argc, char* argv[])
+{
+    if(argc != 3)
+    {
+        std::cerr << "Usage: " << argv[0] << " <file>" << std::endl;
+        return 1;
+    }
+
+    TABLES* tables = nullptr;
+
+    HEADER header;
+
+    size_t* index_table = nullptr; // index_table is indexed by bucket_used, stores the corresponding hash key for each unique word
+
+    try
+    {
+        /*std::string filepath = argv[2];
+
+        std::ifstream ifile;
+        ifile.open(filepath, std::ios::binary);
+
+        if (!ifile.is_open())
+        {
+            throw std::runtime_error("Error: Could not open file " + filepath);
+        }
+
+        Serialisation serialisation;
+
+        serialisation.read_header(ifile, header);
+
+        ifile.close();
+
+        TABLES* tables = serialisation.read_tables(filepath);*/
+        
+        Parser parser(argv[1]/*, argv[2]*/);
+        const WordRecord_new* const *const hash_table = (const WordRecord_new* const *const) parser.build_hash_table_very_new(&index_table);
+        //parser.close();
+
+        std::cout<< "Total lines Processed = " << parser.get_nol() << std::endl;
+        std::cout<< "Longet line length = " << parser.get_mxntpl() << ", Smallest line length = " << parser.get_mnntpl() << std::endl;
+        std::cout<< "tnt = " << parser.get_tnt() << ", Bucket Count = " << parser.get_bucket_count() << ", Bucket Used = " << parser.get_bucket_used() << std::endl;
+
+        // Test word id to key mapping, going through index_table
+        /*
+        for (size_t i = 0; i < parser.get_bucket_used(); i++)
+        {
+            size_t key = index_table[i];
+            const WordRecord_new* w_rec = hash_table[key];
+
+            if (w_rec != nullptr)
+            {
+                std::cout<< "Word ID = " << i << ", Key = " << key << ", Word = " << w_rec->get_word() << std::endl; 
+            }
+        }
+         */    
+
+        //exit(0);
+
+        //parser.build_lines_table_very_new(hash_table);
+
+        //exit(0);
+
+        WORDS** lines_array = parser.build_lines_table(hash_table);
+
+        /*for (size_t i = 0; i < parser.get_nol(); i++)
+        {
+            WORDS* ptr = lines_array[i];
+
+            std::cout<< "n = " << ptr->n << ", ";
+
+            for (size_t j = 0; j < ptr->n; j++)
+            {
+                std::cout<< ptr->keys[j] << " ";
+            }
+            std::cout<< std::endl;
+        }*/
+
+        /*for (size_t i = 0; i < parser.get_bucket_count(); i++)
+        {
+            if (hash_table[i] != nullptr)
+            {
+                std::cout<< "Bucket " << i << ": " << hash_table[i]->word << ", Frequency: " << hash_table[i]->get_n() << std::endl; 
+            }
+            else
+            {
+                std::cout<< "Bucket " << i << ": " << "Empty" << std::endl; 
+            }
+        }*/
+
+        //tables = parser.build_hash_table_with_checkpoints(tables, &header);
+       //tables = parser.build_hash_table_with_checkpoints(nullptr, nullptr); 
+
+       std::cout << "Started building the lines linked list..." << std::endl;
+       std::cout << "Each line is doubly linked to its two neighbors, and each token within a line is doubly linked to its neighbors. Instead of storing actual words, each token links to its corresponding entry in the vocabulary hash table." << std::endl;
+
+       Pairs pairs(argv[1]);
+
+       /* Old ways 1 */
+       //LINES_NEW* lines = pairs.build_lines(parser, hash_table);
+       // std::cout<< "Finished building lines linked list." << std::endl;
+
+       /*LINES_NEW* lines_tail = lines;
+
+       while (lines_tail != nullptr)
+       {
+            TOKEN_NEW* tokens_tail = lines_tail->tokens;
+
+            while (tokens_tail != nullptr)
+            {
+                //std::cout<< "Token: " << hash_table[tokens_tail->key]->get_word() << " ";
+                std::cout<< hash_table[tokens_tail->key]->get_word() << " ";
+                tokens_tail = tokens_tail->next;
+            }
+
+            std::cout<< std::endl;
+                        
+            lines_tail = lines_tail->next;
+       }
+       */
+             
+       std::cout << "Started building the pairs array..." << std::endl;
+       std::cout << "Each pair consists of a left context, a right context, and a target (word for which the context is being created). The left and right contexts are arrays of keys representing tokens that appear in the vicinity of the target token.";
+
+       /*
+       struct ContextPairs** contexts = pairs.build_pairs(parser, lines_array); 
+       // Older way 2 
+       //struct ContextPairs** contexts = pairs.build_pairs(parser, lines, hash_table);
+
+       std::cout << "Finished building pairs array.";       
+       std::cout<< " Total pairs build = ";
+
+       size_t total_pairs = 0;
+
+       for (size_t i = 0; i < parser.get_nol(); i++)
+       {
+           total_pairs = total_pairs + contexts[i]->n;
+       }       
+       
+       std::cout<< total_pairs << std::endl;
+        */
+
+       struct ContextPairs** contexts = pairs.build_pairs(parser, lines_array, (WordRecord_new**)hash_table);
+       
+       std::cout << "Finished building pairs array.";       
+       std::cout<< " Total pairs build = ";
+       size_t total_pairs = 0;
+       for (size_t i = 0; i < parser.get_nol(); i++)
+       {
+           total_pairs = total_pairs + contexts[i]->n;
+       }              
+       std::cout<< total_pairs << std::endl;
+
+/*       
+       for (size_t i = 0; i < parser.get_nol(); i++)
+       {
+        std::cout<< "Line " << i + 1 << " : "; 
+
+          for (size_t j = 0; j < contexts[i]->n; j++)
+          {
+               const ContextPair*  pair = contexts[i]->pairs[j];  
+
+               // Left context
+               for (size_t k = 0; k < CONTEXT_WINDOW_SIZE; k++)
+               {
+                    if (pair->left_context_keys[k] != PAIRS_PADDING_KEY) 
+                    {
+                        std::cout<< hash_table[pair->left_context_keys[k]]->get_word() << " ";
+                    }
+                    else
+                    {
+                        std::cout<< "NONE" << " ";
+                    }
+               }
+               
+               std::cout<< " [" << hash_table[pair->target_key]->get_word() << "] ";
+
+               // Right context
+               for (size_t k = 0; k < CONTEXT_WINDOW_SIZE; k++)
+               {
+                    if (pair->right_context_keys[k] != PAIRS_PADDING_KEY) 
+                    {
+                        std::cout<< hash_table[pair->right_context_keys[k]]->get_word() << " ";
+                    }
+                    else
+                    {
+                        std::cout<< "NONE" << " ";
+                    }
+               }
+
+               std::cout<< " <> " ;
+          }
+
+          std::cout<< std::endl;
+       }
+*/          
+
+       parser.free_tables_very_new((WordRecord_new**)hash_table, lines_array, index_table);
+
+       std::cout<< "-:END:-" << std::endl;
+
+    }
+    catch (std::runtime_error& e)
+    {
+        std::cerr << "Runtime Error: " << e.what() << std::endl;
+        return 1;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+    catch (...)
+    {
+        std::cerr << "Error: Unknown exception" << std::endl;
+        return 1;
+    }
+    
+    if (tables != nullptr)
+    {
+        std::cout<< "Maximum Tokens Per Line: " << tables->maximum_tokens_per_line << std::endl; 
+        std::cout<< "Minimum Tokens Per Line: " << tables->minimum_tokens_per_line << std::endl;
+        std::cout<< "Total Number of Tokens: " << tables->total_tokens << std::endl; 
+
+        std::cout<< "bucket_count: " << tables->bucket_count << std::endl; 
+        std::cout<< "bucket_used/Vocabulary Size: " << tables->bucket_used << std::endl;
+    }
+
+    /*for (size_t i = 0; i < tables->bucket_used; i++)
+    {
+        std::cout<< tables->hash_to_word_record[tables->word_id_to_hash[i]]->word << std::endl; 
+
+        size_t j = 0;
+
+        OccurrenceNode* node = tables->hash_to_word_record[tables->word_id_to_hash[i]]->head;  
+        while (node != nullptr)
+        {
+            std::cout<< j << ": " <<  node->line << " " << node->token << std::endl; 
+            node = node->next;
+
+            j = j + 1;
+        }        
+    }*/
+
+    Serialisation serialisation;
+
+    try
+    {
+        /*std::string filepath = argv[2];
+        serialisation.read_tables(filepath);*/
+    }
+    catch (std::runtime_error& e)
+    {
+        std::cerr << "Runtime Error: " << e.what() << std::endl;
+        return 1;
+    }
+    catch (...)
+    {
+        std::cerr << "Error: Unknown exception" << std::endl;
+        return 1;
+    }
+    
+    return 0;
+}

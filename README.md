@@ -1,120 +1,103 @@
 # Parser
 
-A C++ library for reading a corpus and building a vocabulary index for NLP-style preprocessing tasks.
+A C++ library for reading a corpus file, building a vocabulary index, and materialising a compact representation of token keys per line for NLP-style preprocessing and training pipelines.
 
-The codebase is currently in a transition phase: the newer implementation uses a flatter, more cache-friendly layout, while older linked-list based code still remains in the repository for reference and gradual replacement.
-
----
-
-## Current status
-
-The main implementation in [lib/Parser/lib/src/Parser.hh](lib/Parser/lib/src/Parser.hh) now follows a newer path built around:
-
-- `WordRecord_new` for vocabulary entries
-- `WORDS` for per-line token-key storage
-- `build_hash_table_very_new()` for vocabulary construction
-- `build_lines_table()` for building the flat line-token table
-- `free_tables_very_new()` for cleanup
-
-This newer design is intended to reduce heap fragmentation and avoid the overhead of per-occurrence linked-list nodes. It is the path currently being exercised by the parser code in this repository.
-
-## Important note about legacy code
-
-This repository still contains older parser code that is being phased out. That includes:
-
-- older linked-list based structures such as `WordRecord`, `OccurrenceNode`, and `TABLES`
-- older implementation paths in the `old-implementation` directories
-- documentation and comments that still describe the earlier architecture
-
-That legacy material is still present for reference, comparison, and compatibility during the migration. It should not be treated as the primary implementation going forward.
+The current implementation in this repository is the flat, cache-friendly path. It is centred around the newer parser API in [lib/src/Parser.hh](lib/src/Parser.hh), the streaming iterator in [lib/src/Iterator.hh](lib/src/Iterator.hh), and the current record types in [lib/src/WordRecord.hh](lib/src/WordRecord.hh).
 
 ---
 
-## Intended use
+## What the current code does
 
-If you are building a package that needs corpus tokenisation and vocabulary indexing, `Parser` (along with its dependency [Hash](https://github.com/KHAAdotPK/Hash)) should be placed in the `lib/` directory of your package.
+The active parser flow is:
 
-### Optional text cleaning
+1. Open a corpus file with `Parser`.
+2. Build a vocabulary hash table with `build_hash_table_very_new(size_t** index_table)`.
+3. Build a flat per-line token-key table with `build_lines_table(const WordRecord_new* const *const hash_table)`.
+4. Release the allocated memory with `free_tables_very_new(WordRecord_new**, WORDS**, size_t*)` when finished.
 
-Before tokenisation, `Parser`'s `Iterator` can pass each line through a `Cleaner` object to strip punctuation and noise characters. This is enabled by defining `ITERATOR_USER_DEFINED_CLEANER_CODE` before including `Parser/header.hh`.
-
-Two cleaning packages are available depending on the language of the corpus:
-
-| Package | Language | Repository |
-|---|---|---|
-| [Imprint](https://github.com/KHAAdotPK/Imprint.git) | English | Unicode-aware punctuation stripping for English text |
-| [Naqsh](https://github.com/KHAAdotPK/Naqsh.git) | Urdu | Unicode-aware punctuation and noise normalisation for Urdu text |
-
-These packages are intended to plug into `Parser` via the `ITERATOR_USER_DEFINED_CLEANER_CODE` macro hook.
+This design avoids the older linked-list-based occurrence tracking and replaces it with a more compact representation that is better suited to modern training loops.
 
 ---
 
-## Dependencies
+## Current data model
 
-`Parser` has one direct dependency:
+The main runtime structures are:
 
-- **[Hash](https://github.com/KHAAdotPK/Hash)** — provides `Keys::generate_key()` and `Keys::next_prime()`, which drive the hashing and rehash strategy used by the parser.
+- `WordRecord_new` — one record per unique token, storing:
+  - `word_id`
+  - `word`
+  - `n` (frequency count)
+- `WORDS` — one object per line, storing:
+  - `n` (number of tokens on that line)
+  - `keys` (a contiguous array of hash keys for the line)
 
-Both `Parser` and `Hash` should be present under the `lib/` directory of the package that depends on them.
+The older linked-list structures such as `WordRecord`, `Line`, `Token`, `OccurrenceNode`, and `TABLES` still exist in the repository for reference, but they are not the primary implementation path anymore.
 
 ---
 
-## Architecture
+## Parser API overview
 
-The library is built around three cooperating pieces:
-
-### `Iterator` — streaming tokeniser
-
-A C++ input iterator that wraps an `std::ifstream` and yields one line at a time as a `std::vector<std::string>` of token fields. It splits on `CSV_PARSER_TOKEN_DELIMITER` and is compatible with range-based iteration.
-
-Optional behaviour can be enabled through macros:
-
-- `ITERATOR_USER_DEFINED_CLEANER_CODE` — normalises each line through a `Cleaner` object before tokenisation
-- `ITERATOR_GUARD_AGAINST_EMPTY_STRING` — skips empty token fields caused by adjacent delimiters
-
-### `Parser` — corpus reader and index builder
-
-The parser owns the file stream and exposes `begin()`/`end()` so it can be iterated directly. The newer implementation builds a vocabulary table and a flat line-table through the following methods:
+### Building the vocabulary
 
 ```cpp
-WordRecord_new** vocab = parser.build_hash_table_very_new();
+#include "lib/Parser/header.hh"
+
+Parser parser("corpus.txt");
+size_t* index_table = nullptr;
+WordRecord_new** vocab = parser.build_hash_table_very_new(&index_table);
+```
+
+This builds a hash table of unique tokens and updates the parser state:
+
+- `bucket_count`
+- `bucket_used`
+- `nol` (number of lines)
+- `tnt` (total number of tokens)
+- `mxntpl` / `mnntpl` (token-count statistics)
+
+The file stream is rewound at the end of the build step, so the parser can be reused.
+
+### Building the flat line table
+
+```cpp
 WORDS** lines = parser.build_lines_table(vocab);
 ```
 
-The file is rewound after the build step so the parser can be reused if needed.
+Each `WORDS` object owns a contiguous `keys` array for one line. This makes token access much more cache-friendly than the older linked-list representation.
 
-### Newer data model
+### Cleaning up
 
-The newer path uses a compact representation:
-
-```text
-hash_table[i] -> WordRecord_new
-lines_array[i] -> WORDS
+```cpp
+parser.free_tables_very_new(vocab, lines, index_table);
 ```
 
-Where:
-
-- each `WordRecord_new` stores the token string, a stable word id, and the frequency count
-- each `WORDS` object owns a contiguous array of hash keys for one line
-
-This is the preferred direction for the current implementation.
-
-### Legacy data model
-
-The older design used a linked-list based vocabulary structure built around `TABLES`, `WordRecord`, and `OccurrenceNode`. That path remains in the repository as historical code and is expected to be replaced by the newer flat-array implementation.
+The caller is responsible for releasing the memory allocated by the build functions.
 
 ---
 
-## Hash table design
+## Iterator behaviour
 
-The hash table uses open addressing with linear probing and a prime bucket count, starting from `KEYS_COMMON_STARTING_SIZE`. The hash function is provided by `Keys::generate_key(word, bucket_count)`.
+The iterator in [lib/src/Iterator.hh](lib/src/Iterator.hh) reads one line at a time from an `std::ifstream` and yields a `std::vector<std::string>` of token fields.
 
-When a collision occurs, the parser probes forward until it finds either:
+It supports the following optional hooks:
 
-- an empty slot for a new token, or
-- an existing slot containing the same token
+- `CSV_PARSER_TOKEN_DELIMITER` — custom field separator (default is `,`)
+- `ITERATOR_USER_DEFINED_CLEANER_CODE` — run each line through a `Cleaner` implementation before tokenisation
+- `ITERATOR_GUARD_AGAINST_EMPTY_STRING` — skip empty token fields caused by adjacent delimiters
 
-The table is rehashed when the load factor exceeds `KEYS_LOAD_FACTOR_THRESHOLD`, using `Keys::next_prime()` to enlarge the bucket count.
+The iterator is compatible with range-based iteration and can be used directly via `Parser::begin()` / `Parser::end()`.
+
+---
+
+## Hash-table design
+
+The current implementation uses open addressing with linear probing:
+
+- The table starts at `KEYS_COMMON_STARTING_SIZE`.
+- Hashing is performed with `Keys::generate_key()` from the Hash dependency.
+- The table is rehashed when the load factor exceeds `KEYS_LOAD_FACTOR_THRESHOLD` using `Keys::next_prime()`.
+
+This keeps the vocabulary index compact while still providing constant-time average lookup for tokens seen during parsing.
 
 ---
 
@@ -122,42 +105,42 @@ The table is rehashed when the load factor exceeds `KEYS_LOAD_FACTOR_THRESHOLD`,
 
 | Macro | Effect |
 |---|---|
-| `CSV_PARSER_TOKEN_DELIMITER` | Field separator character (for example `','`) |
-| `KEYS_COMMON_STARTING_SIZE` | Initial bucket count (recommended: a prime, for example `1009`) |
-| `KEYS_LOAD_FACTOR_THRESHOLD` | Rehash trigger ratio (for example `0.7`) |
-| `ITERATOR_USER_DEFINED_CLEANER_CODE` | Enable line-cleaning via a `Cleaner` class |
+| `CSV_PARSER_TOKEN_DELIMITER` | Field separator character used by the iterator |
+| `KEYS_COMMON_STARTING_SIZE` | Initial number of hash buckets |
+| `KEYS_LOAD_FACTOR_THRESHOLD` | Rehash trigger threshold |
+| `ITERATOR_USER_DEFINED_CLEANER_CODE` | Enable line cleaning via a `Cleaner` object |
 | `ITERATOR_GUARD_AGAINST_EMPTY_STRING` | Skip empty token fields |
 
 ---
 
-## Usage
+## Repository layout
 
-```cpp
-#include "lib/Parser/header.hh"
-
-Parser parser("corpus.csv");
-
-WordRecord_new** vocab = parser.build_hash_table_very_new();
-WORDS** lines = parser.build_lines_table(vocab);
-
-// vocab[key] points to the vocabulary entry for that hash bucket
-// lines[i] contains the flattened token-key sequence for line i
-```
-
-The caller is responsible for releasing the memory allocated for the vocabulary and line tables when they are no longer needed.
+- [header.hh](header.hh) — public include file and default configuration constants
+- [lib/src/Iterator.hh](lib/src/Iterator.hh) — line-based token iterator
+- [lib/src/Parser.hh](lib/src/Parser.hh) — main parser implementation and build functions
+- [lib/src/WordRecord.hh](lib/src/WordRecord.hh) — current and legacy record structures
+- [old-implementation](old-implementation) — older linked-list-based parser code retained for reference
 
 ---
 
-## Roadmap
+## Dependencies
 
-- [x] Move the main parsing path toward the newer flat-table representation
-- [ ] Consolidate the public API around the new naming and ownership model
-- [ ] Remove or isolate the remaining legacy `TABLES`-based code paths
-- [ ] Clean up old comments, dead code, and transitional documentation
-- [ ] Add clearer ownership helpers and safer cleanup patterns
+The parser relies on:
+
+- [Hash](https://github.com/KHAAdotPK/Hash) — hashing helpers and prime generation
+- the local Corpus package in this workspace for shared parser/corpus support types
+
+If you are integrating this library into another project, keep the relevant `lib/` packages available alongside the parser.
+
+---
+
+## Notes for maintainers
+
+- The current implementation prioritises a compact memory layout and faster access over full occurrence tracking.
+- The old `TABLES`-based path remains in the repository as historical code and should be treated as legacy material unless it is explicitly reintroduced.
 
 ---
 
 ## License
 
-This project is governed by a license, the details of which can be located in the accompanying file named `LICENSE`. Please refer to that file for comprehensive information.
+This project is governed by the repository license. Please refer to the accompanying license file for the full terms.

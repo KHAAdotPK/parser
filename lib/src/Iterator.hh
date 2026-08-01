@@ -96,7 +96,7 @@ class Iterator
 #endif
             if (std::getline(*_stream, line))
             {
-#ifdef ITERATOR_USER_DEFINED_CLEANER_CODE                
+#ifdef ITERATOR_USER_DEFINED_CLEANER_CODE
                 /*
                     Line Cleaning
                     -------------

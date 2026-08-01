@@ -115,48 +115,94 @@ class Parser
         }
 
         /**
-         * @brief Frees the memory allocated for the hash table and lines array.
-         * @param hash_table Pointer to the hash table.
-         * @param lines_array Pointer to the array of lines.
+         * @brief Frees all dynamically allocated memory associated with the hash table,
+         *        the lines array, and the index table.
+         *
+         * @param hash_table  Pointer to an array of pointers to WordRecord_new objects.
+         *                    This array must have been allocated with `new[]`.
+         * @param lines_array Pointer to an array of pointers to WORDS objects.
+         *                    This array must have been allocated with `new[]`.
+         * @param index_table Pointer to an array of size_t (or a single size_t) that
+         *                    may have been allocated with `new[]` or `new`.
+         *                    The caller is responsible for ensuring the allocation
+         *                    method matches the deallocation used here.
+         *
+         * @pre  hash_table, if not null, points to a valid array of bucket_count()
+         *      pointers. lines_array, if not null, points to a valid array of nol()
+         *      pointers. index_table, if not null, points to a valid memory block.
+         * @post All pointed‑to objects are destroyed and memory is released.
+         *       All pointers passed as arguments are set to nullptr (local effect only).
+         *
+         * @warning The sizes of the arrays are obtained via get_bucket_count() and
+         *          get_nol(). These functions must be safe to call even when their
+         *          corresponding table is nullptr (e.g., they return 0). 
          */
-        void free_tables_very_new(WordRecord_new** hash_table, WORDS** lines_array)
-        {
-            for (size_t i = 0; i < get_bucket_count(); i++)
-            {
-                WordRecord_new* record = hash_table[i];
+         void free_tables_very_new(WordRecord_new** hash_table, WORDS** lines_array, size_t* index_table)
+         {
+             // ==================== FREE HASH TABLE ====================
+             // Only attempt to free if the pointer is not null.
+             if (hash_table != nullptr)
+             {
+                // Get the number of buckets. This function is assumed to be safe
+                // even if hash_table is null (returns 0). If it is not, we are in
+                // undefined territory – but we've already checked null above.
+                size_t bucket_count = get_bucket_count();
 
-                if (record != nullptr)
-                {            
-                    delete record;
-                    hash_table[i] = nullptr;               
-                }
-            }
-
-            delete hash_table;
-
-            hash_table = nullptr;
-
-            for (size_t i = 0; i < get_nol(); i++)
-            {
-                WORDS* line = lines_array[i];
-
-                if (line != nullptr)
+                // Iterate over each bucket and delete the WordRecord_new object.
+                for (size_t i = 0; i < bucket_count; ++i)
                 {
-                    if (line->keys != nullptr)
+                    WordRecord_new* record = hash_table[i];
+                    if (record != nullptr)
                     {
-                        delete line->keys;
-                        line->keys = nullptr;
+                        delete record;          // Destructor should clean up its own members
+                        hash_table[i] = nullptr; // Avoid dangling pointer (defensive)
                     }
+                }
 
-                    delete line;
+                // Delete the array of pointers itself.
+                delete[] hash_table;   // NOT delete – we allocated with new[]
+                // The parameter is local; setting it to nullptr does not affect the caller's
+                // pointer. We do it only to avoid accidental use inside this function.
+                // Caller should still set their own pointer to nullptr after the call.
+                hash_table = nullptr;
+            }
+            // else: hash_table is null, nothing to free.
 
-                    lines_array[i] = nullptr;
-                }       
+            // ==================== FREE LINES ARRAY ====================
+            if (lines_array != nullptr)
+            {
+                size_t num_lines = get_nol(); // Assumed safe even if lines_array is null
+
+                for (size_t i = 0; i < num_lines; ++i)
+                {
+                    WORDS* line = lines_array[i];
+                    if (line != nullptr)
+                    {
+                        // Free the internal 'keys' array if present.
+                        if (line->keys != nullptr)
+                        {
+                            delete[] line->keys; // assuming keys was allocated with new[]
+                            line->keys = nullptr;
+                        }
+
+                        delete line;          // Destructor should clean up other members
+                        lines_array[i] = nullptr;
+                    }
+                }
+
+                delete[] lines_array;   // array of pointers, so delete[]
+                lines_array = nullptr;
             }
 
-            delete lines_array;
-
-            lines_array = nullptr;
+            // ==================== FREE INDEX TABLE ====================
+            // index_table may be an array or a single size_t; we assume it was allocated
+            // with new[] (common for arrays). If it was a single object, use delete.
+            // We choose delete[] here (adjust if needed).
+            if (index_table != nullptr)
+            {
+                delete[] index_table;   // or delete index_table; – caller must guarantee match
+                index_table = nullptr;
+            }
         }
     
         // Constructors
@@ -229,6 +275,28 @@ class Parser
  
         // Destructor – file closed automatically
         ~Parser() = default;
+
+
+        /*
+        // It is there just for debugging purposes. It should be removed
+        WORDS** build_lines_table_very_new(const WordRecord_new* const *const hash_table)
+        {
+            for (auto& line : *this) // When you dereference the iterator (via `operator*()`), it returns a reference to its internal member `_current`, which is of type `std::vector<std::string>`
+                                     // Therefore, the loop variable `line` is of type `std::vector<std::string>&
+                                     // When you call `line.size()`, you are calling the standard library method `std::vector::size()` on the vector of tokens for the current line. It outputs the total count of parsed tokens on that line
+            {
+
+                for (size_t i = 0; i < line.size(); i++)
+                {
+                    std::cout<< line[i] << " ";
+                }
+                std::cout<< std::endl;
+            }
+
+            return nullptr; // Placeholder implementation
+        }
+         */    
+
 
         /*
          * Dynamically builds a flat, cache-friendly table of lines and their tokens.
@@ -613,7 +681,7 @@ class Parser
             • Faster construction due to reduced bookkeeping.
             • Uses WordRecord_new instead of WordRecord for potential type compatibility.
          */
-        WordRecord_new** build_hash_table_very_new(void)
+        WordRecord_new** build_hash_table_very_new(size_t** index_table) // index_table is indexed by bucket_used, stores the corresponding hash key for each unique word
         {
             bucket_count = KEYS_COMMON_STARTING_SIZE;
             bucket_used = 0;
@@ -622,14 +690,20 @@ class Parser
 
             // hash_table is indexed by hash key, stores pointers to WordRecord object
             WordRecord_new** hash_table = nullptr;
+            //size_t* index_table = nullptr; // index_table is indexed by bucket_used, stores the corresponding hash key for each unique word
 
             try
             {
-                hash_table = new WordRecord_new*[bucket_count](); // Create array of pointers to WordRecord and return address of first element of the array
+                hash_table = new WordRecord_new*[bucket_count](); // Create array of pointers to WordRecord and return address of first element of the array                
                 /*
                  * The () at the end is critical — it zero-initialises every pointer to nullptr.
                  * Without it, all bucket pointers are uninitialised garbage, and your
                  * (hash_table[key] == nullptr) check for unique words becomes undefined behaviour.
+                 */
+
+                *index_table = new size_t[bucket_count](); // Create array of hashed keys (size_t) and return address of first element of the array
+                /*
+                 * The () at the end is critical — it zero-initialises every entry of this array to zero.
                  */
             }
             catch (const std::bad_alloc& e)
@@ -661,6 +735,8 @@ class Parser
                         {
                             hash_table[key] = new WordRecord_new(bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE, token, 1); // Create new WordRecord for this unique token and insert into hash table at the generated key
                                                                                                                        // Token ID always originate at TOKEN_ID_ORIGINATE_AT_VALUE 
+
+                            *(*index_table + bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE) = key; // Store the hash key for this unique word in the index_table, indexed by bucket_used
                         }
                         catch (const std::bad_alloc& e)
                         {
@@ -684,6 +760,8 @@ class Parser
                                 try
                                 {
                                     hash_table[probe] = new WordRecord_new(bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE, token, 1); // Create new WordRecord for this unique token and insert into hash table at the probed key
+
+                                    *(*index_table + bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE) = probe; // Store the hash key for this unique word in the index_table, indexed by bucket_used
                                 }
                                 catch (const std::bad_alloc& e)
                                 {
@@ -733,7 +811,9 @@ class Parser
                         size_t old_bucket_count = bucket_count;
                         bucket_count = Keys::next_prime(bucket_count);
 
-                        WordRecord_new** new_hash_table = nullptr;    
+                        WordRecord_new** new_hash_table = nullptr; 
+
+                        size_t* new_index_table = nullptr; // New index table for the rehashed keys
 
                         try
                         {
@@ -742,6 +822,11 @@ class Parser
                              * The () at the end is critical — it zero-initialises every pointer to nullptr.
                              * Without it, all bucket pointers are uninitialised garbage, and your
                              * (hash_table[key] == nullptr) check for unique words becomes undefined behaviour.
+                             */
+
+                            new_index_table = new size_t[bucket_count](); // Create new index table with updated bucket count
+                            /*
+                                * The () at the end is critical — it zero-initialises every entry of this array to zero.
                              */
                         }
                         catch (const std::bad_alloc& e)
@@ -759,7 +844,9 @@ class Parser
 
                                 if (new_hash_table[key] == nullptr) // Case A: New Word 
                                 {
-                                    new_hash_table[key] = entry;                                                                                              
+                                    new_hash_table[key] = entry;
+                                    
+                                    *(new_index_table + entry->get_word_id()) = key; // Store the hash key for this unique word in the new index_table, indexed by word_id                                    
                                 }                    
                                 else // Collision — need to probe for an empty bucket or a direct match
                                 {
@@ -770,6 +857,8 @@ class Parser
                                         if (new_hash_table[probe] == nullptr) // Case D: New Displaced Word
                                         {
                                             new_hash_table[probe] = entry;
+                                            *(new_index_table + entry->get_word_id()) = probe; // Store the hash key for this unique word in the new index_table, indexed by word_id
+                                            
                                             break;
                                         }
 
@@ -786,6 +875,9 @@ class Parser
 
                         delete[] hash_table; // Free old table
                         hash_table = new_hash_table; // Point to new table
+
+                        delete[] *index_table; // Free old index table
+                        *index_table = new_index_table; // Point to new index table
                     }
 
                     tnt++; // Increment total token count for the corpus

@@ -11,7 +11,7 @@ The current implementation in this repository is the flat, cache-friendly path. 
 The active parser flow is:
 
 1. Open a corpus file with `Parser`.
-2. Build a vocabulary hash table with `build_hash_table_very_new(size_t** index_table)`.
+2. Build a vocabulary hash table and populate `index_table` with the word-id → key mapping via `build_hash_table_very_new(size_t** index_table)`.
 3. Build a flat per-line token-key table with `build_lines_table(const WordRecord_new* const *const hash_table)`.
 4. Release the allocated memory with `free_tables_very_new(WordRecord_new**, WORDS**, size_t*)` when finished.
 
@@ -47,7 +47,7 @@ size_t* index_table = nullptr;
 WordRecord_new** vocab = parser.build_hash_table_very_new(&index_table);
 ```
 
-This builds a hash table of unique tokens and updates the parser state:
+This builds a hash table of unique tokens, populates the caller-provided `index_table` as the word-id → key mapping, and updates the parser state:
 
 - `bucket_count`
 - `bucket_used`

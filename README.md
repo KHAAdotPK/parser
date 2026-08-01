@@ -119,6 +119,7 @@ This keeps the vocabulary index compact while still providing constant-time aver
 - [lib/src/Iterator.hh](lib/src/Iterator.hh) — line-based token iterator
 - [lib/src/Parser.hh](lib/src/Parser.hh) — main parser implementation and build functions
 - [lib/src/WordRecord.hh](lib/src/WordRecord.hh) — current and legacy record structures
+- [DOCUMENTS/Vocabulary-Data-Structures.md](DOCUMENTS/Vocabulary-Data-Structures.md) — detailed note on parser vocabulary and context-pair data structures
 - [old-implementation](old-implementation) — older linked-list-based parser code retained for reference
 
 ---

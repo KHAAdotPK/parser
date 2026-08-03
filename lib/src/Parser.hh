@@ -1,7 +1,12 @@
 /*
     lib/src/Parser.hh
-    Q@hackers.pk
- */
+
+    Declaration of the Parser class used to read corpus input, scan lines and
+    tokens, and collect structural statistics that support the downstream
+    vocabulary and skip-gram pipeline.
+
+    Maintainer: Sohail.
+*/
 
 #ifndef CSV_PARSER_LIB_PARSER_HH
 #define CSV_PARSER_LIB_PARSER_HH
@@ -701,7 +706,8 @@ class Parser
                  * (hash_table[key] == nullptr) check for unique words becomes undefined behaviour.
                  */
 
-                *index_table = new size_t[bucket_count](); // Create array of hashed keys (size_t) and return address of first element of the array
+                *index_table = new size_t[bucket_count + TOKEN_ID_ORIGINATE_AT_VALUE](); // Create array of hashed keys (size_t) and return address of first element of the array
+                                                                                         // The + TOKEN_ID_ORIGINATE_AT_VALUE is to accommodate the offset for word IDs starting at TOKEN_ID_ORIGINATE_AT_VALUE (typically 1) rather than 0. This ensures that the index_table can store keys for all unique words, including the first one.   
                 /*
                  * The () at the end is critical — it zero-initialises every entry of this array to zero.
                  */
@@ -736,6 +742,22 @@ class Parser
                             hash_table[key] = new WordRecord_new(bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE, token, 1); // Create new WordRecord for this unique token and insert into hash table at the generated key
                                                                                                                        // Token ID always originate at TOKEN_ID_ORIGINATE_AT_VALUE 
 
+                            /*
+                                TOKEN_ID_ORIGINATE_AT_VALUE is the base offset applied to the
+                                first vocabulary word ID. In this codebase it is defined as 1,
+                                so the first real token receives word_id = 1 rather than 0.
+
+                                This keeps the compact word-id space separate from the special
+                                padding slot used by the context-pair pipeline. In the current
+                                Pairs implementation, missing left/right context positions are
+                                filled with the literal value 0 in the context arrays, and that
+                                value is interpreted as padding downstream.
+
+                                The intent is therefore simple: reserve ID 0 for padding/special
+                                handling, while all regular vocabulary tokens start at ID 1 or
+                                higher. This avoids collisions between real vocabulary ids and
+                                the sentinel value used for missing context positions.
+                             */                                                                                                                       
                             *(*index_table + bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE) = key; // Store the hash key for this unique word in the index_table, indexed by bucket_used
                         }
                         catch (const std::bad_alloc& e)
@@ -761,6 +783,22 @@ class Parser
                                 {
                                     hash_table[probe] = new WordRecord_new(bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE, token, 1); // Create new WordRecord for this unique token and insert into hash table at the probed key
 
+                                    /*
+                                        TOKEN_ID_ORIGINATE_AT_VALUE is the base offset applied to the
+                                        first vocabulary word ID. In this codebase it is defined as 1,
+                                        so the first real token receives word_id = 1 rather than 0.
+
+                                        This keeps the compact word-id space separate from the special
+                                        padding slot used by the context-pair pipeline. In the current
+                                        Pairs implementation, missing left/right context positions are
+                                        filled with the literal value 0 in the context arrays, and that
+                                        value is interpreted as padding downstream.
+
+                                        The intent is therefore simple: reserve ID 0 for padding/special
+                                        handling, while all regular vocabulary tokens start at ID 1 or
+                                        higher. This avoids collisions between real vocabulary ids and
+                                        the sentinel value used for missing context positions.
+                                     */    
                                     *(*index_table + bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE) = probe; // Store the hash key for this unique word in the index_table, indexed by bucket_used
                                 }
                                 catch (const std::bad_alloc& e)
@@ -824,7 +862,8 @@ class Parser
                              * (hash_table[key] == nullptr) check for unique words becomes undefined behaviour.
                              */
 
-                            new_index_table = new size_t[bucket_count](); // Create new index table with updated bucket count
+                            new_index_table = new size_t[bucket_count + TOKEN_ID_ORIGINATE_AT_VALUE](); // Create new index table with updated bucket count
+                                                                                                        // The + TOKEN_ID_ORIGINATE_AT_VALUE is to accommodate the offset for word IDs starting at TOKEN_ID_ORIGINATE_AT_VALUE (typically 1) rather than 0. This ensures that the index_table can store keys for all unique words, including the first one.            
                             /*
                                 * The () at the end is critical — it zero-initialises every entry of this array to zero.
                              */
@@ -857,6 +896,10 @@ class Parser
                                         if (new_hash_table[probe] == nullptr) // Case D: New Displaced Word
                                         {
                                             new_hash_table[probe] = entry;
+                                            /*
+                                                entry->get_word_id() returns the unique word ID assigned to this token, which is used as the index into the new index_table. The value stored at that index is the new hash key (probe) where this word now resides in the rehashed table.
+                                                entry->get_word_id() returns a value in the range [TOKEN_ID_ORIGINATE_AT_VALUE, TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used - 1], which is guaranteed to be within the bounds of the new index_table since bucket_used ≤ bucket_count. This ensures that we do not write out of bounds when storing the new hash key.
+                                             */
                                             *(new_index_table + entry->get_word_id()) = probe; // Store the hash key for this unique word in the new index_table, indexed by word_id
                                             
                                             break;

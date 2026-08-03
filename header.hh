@@ -1,6 +1,10 @@
 /*
-    lib/parser/header.hh
-    Q@hackers.pk
+    lib/Parser/header.hh
+
+    This header file serves as a central inclusion point for all necessary headers related to the Parser class and its dependencies. 
+    It includes the Serialisation header from the Corpus library, which defines the structures and functions needed for reading and writing corpus data, as well as the Parser header itself, which defines the Parser class.
+
+    Maintainer: Sohail.    
  */
 
 #ifndef CSV_PARSER_LIB_PARSER_HEADER_HH

@@ -302,6 +302,272 @@ class Parser
         }
          */    
 
+        /*
+        void descending_quick_sort_index_table(size_t* index_table, size_t bucket_used, WordRecord_new** hash_table)
+        {            
+            if (bucket_used <= 1)
+            {
+                return; // Base case: already sorted
+            }
+
+            size_t pivot_index = index_table[(TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used) / 2];
+            WordRecord_new* pivot_record = hash_table[pivot_index];
+
+            size_t i = TOKEN_ID_ORIGINATE_AT_VALUE;
+            size_t j = bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE - 1;
+
+            while (i <= j)
+            {
+                while (hash_table[index_table[i]]->get_n() > pivot_record->get_n())
+                {
+                    i++;
+                }
+                while (hash_table[index_table[j]]->get_n() < pivot_record->get_n())
+                {
+                    j--;
+                }
+                if (i <= j)
+                {
+                    std::swap(index_table[i], index_table[j]);
+                    i++;
+                    j--;
+                }
+            }
+
+            std::cout<< "Passed \n";
+
+            if (j > 0)
+            {
+                descending_quick_sort_index_table(index_table, j + 1, hash_table);
+            }
+
+            descending_quick_sort_index_table(index_table + i, bucket_used - i, hash_table);    
+        }
+         */
+
+        /*
+         * @brief Sorts a segment of the index table in descending order of word frequency
+         *        and updates each word's ID to reflect its new sorted position.
+         *
+         * This function operates on a contiguous sub-range of `index_table` that
+         * corresponds to the active (populated) entries in a hash table. The range
+         * begins at a fixed offset (`TOKEN_ID_ORIGINATE_AT_VALUE`) and spans exactly
+         * `bucket_used` elements. It reorders these entries so that the word with the
+         * highest frequency (`n` in `WordRecord_new`) appears first, and then assigns
+         * a new `word_id` to each record equal to its absolute index in `index_table`
+         * after sorting.
+         *
+         * @param index_table   Pointer to an array of `size_t` elements. Each element
+         *                      is a key (index) into `hash_table` pointing to a
+         *                      `WordRecord_new` object. The array must be large enough
+         *                      to hold at least `TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used`
+         *                      entries.
+         * @param bucket_used   Number of valid/active entries in the hash table that
+         *                      are to be sorted. This determines the size of the
+         *                      sub‑range to be processed.
+         * @param hash_table    Pointer to an array of `WordRecord_new*` pointers.
+         *                      This table is indexed by the values stored in
+         *                      `index_table` to retrieve the corresponding word records.
+         *
+         * @pre `index_table` is non-null and contains valid keys for the range
+         *      [TOKEN_ID_ORIGINATE_AT_VALUE, TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used).
+         * @pre `hash_table` is non-null and each key in the above range points to a
+         *      valid non-null `WordRecord_new` object.
+         * @pre `TOKEN_ID_ORIGINATE_AT_VALUE` is a compile‑time constant that defines
+         *      the starting offset for the active portion of `index_table`.
+         *
+         * @post The sub‑range [TOKEN_ID_ORIGINATE_AT_VALUE,
+         *       TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used) of `index_table` is sorted
+         *       in **descending** order of `WordRecord_new::get_n()` (frequency count).
+         * @post For every `i` in that sub‑range, the `word_id` member of the record
+         *       pointed to by `hash_table[index_table[i]]` is set to `i`. This makes
+         *       `word_id` equal to the record’s final position in the sorted table.
+         *
+         * @par Complexity
+         *      Sorting is performed by `std::sort` with an average‑case O(N log N)
+         *      time complexity, where N = `bucket_used`. The post‑processing update
+         *      pass runs in O(N). The total time is O(N log N) and the function uses
+         *      O(1) additional space (besides the input arrays).
+         *
+         * @return void
+         */
+        void descending_sort_index_table(size_t* index_table, size_t bucket_used, WordRecord_new** hash_table)
+        {
+            // 1. Calculate boundaries based on your offset token ID
+            size_t start_idx = TOKEN_ID_ORIGINATE_AT_VALUE;
+            size_t end_idx = bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE;
+
+            // 2. Sort the populated portion of the `index_table` in descending order
+            //    by the frequency `n` stored in the corresponding `WordRecord_new`.
+            //
+            // Explanation of the arguments passed to `std::sort`:
+            //  - `index_table + start_idx` is a pointer/iterator to the first element
+            //    of the sub-range we want to sort. Here `start_idx` equals
+            //    `TOKEN_ID_ORIGINATE_AT_VALUE` and is inclusive.
+            //  - `index_table + end_idx` is a pointer/iterator one past the last
+            //    element to sort. `end_idx` is computed as `bucket_used +
+            //    TOKEN_ID_ORIGINATE_AT_VALUE` and is exclusive (standard C++ range
+            //    convention). Together these two form the half-open range
+            //    [first, last) that `std::sort` will reorder in-place.
+            //
+            // What is stored inside `index_table`?
+            //  - `index_table` is an array of `size_t` values. Each element is a
+            //    hash key (an index into `hash_table`) that locates a
+            //    `WordRecord_new*` in `hash_table`.
+            //
+            // What does the comparator receive?
+            //  - The comparator lambda receives *elements* from the array — not
+            //    the positions. In this case its parameters `a` and `b` are the
+            //    `size_t` values stored in `index_table` (i.e. hash keys). They
+            //    are not the array indices themselves, but the values pointed to by
+            //    `index_table[i]`.
+            //
+            // Therefore inside the lambda we treat `a` and `b` as keys into
+            // `hash_table` and fetch the corresponding `WordRecord_new*` objects
+            // via `hash_table[a]` and `hash_table[b]`.
+            //
+            // Comparator contract and ordering:
+            //  - The comparator returns `true` when the first element should
+            //    appear before the second. Returning `w_rec1->get_n() >
+            //    w_rec2->get_n()` produces a descending sort by frequency.
+            //  - The comparator must impose a strict weak ordering. Using `>` on
+            //    integer counts satisfies this requirement.
+            //
+            // Complexity note:
+            //  - `std::sort` provides average-case O(N log N) time complexity
+            //    and performs the sort in-place. The range is half-open, so
+            //    ensure `end_idx` points one past the last element to include.
+            std::sort(index_table + start_idx, index_table + end_idx,
+                      [hash_table](size_t a, size_t b) {
+                          // `a` and `b` are hash keys stored in `index_table`.
+                          WordRecord_new* w_rec1 = hash_table[a];
+                          WordRecord_new* w_rec2 = hash_table[b];
+
+                          // Descending order by occurrence count (`n`).
+                          return w_rec1->get_n() > w_rec2->get_n();
+                      });
+
+            // 3. Post-processing Pass: Update word_ids to reflect their exact final position
+            // This replaces all your inner-loop incremental updates with a single O(N) pass.
+            for (size_t i = start_idx; i < end_idx; i++) 
+            {
+                WordRecord_new* w_rec = hash_table[index_table[i]];
+                if (w_rec != nullptr) 
+                {
+                    w_rec->word_id = i; 
+                }
+            }            
+        }
+
+        /*
+         * @brief Sorts a segment of the index table in descending order of word frequency
+         *        using the bubble sort algorithm, updating each word's ID incrementally
+         *        during each swap.
+         *
+         * This function is an alternative to the `descending_sort_index_table` function
+         * (which uses `std::sort`). It performs an in‑place bubble sort on the active
+         * sub‑range of `index_table` (from `TOKEN_ID_ORIGINATE_AT_VALUE` to
+         * `TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used - 1`). After each swap of two
+         * adjacent keys, the `word_id` members of the corresponding `WordRecord_new`
+         * objects are immediately updated to reflect their new positions. This avoids
+         * a separate post‑processing pass, but comes at a significant performance cost.
+         *
+         * @warning This function has O(N²) worst‑case time complexity, where N =
+         *          `bucket_used`. For large datasets, it will be substantially slower
+         *          than the `std::sort`‑based version. The latter is strongly preferred
+         *          for performance‑critical code. This implementation is provided
+         *          mainly for educational or legacy purposes.
+         *
+         * @param index_table   Pointer to an array of `size_t` elements. Each element
+         *                      is a key (index) into `hash_table` pointing to a
+         *                      `WordRecord_new` object. The array must be large enough
+         *                      to hold at least `TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used`
+         *                      entries.
+         * @param bucket_used   Number of valid/active entries in the hash table that
+         *                      are to be sorted. This determines the size of the
+         *                      sub‑range to be processed.
+         * @param hash_table    Pointer to an array of `WordRecord_new*` pointers.
+         *                      This table is indexed by the values stored in
+         *                      `index_table` to retrieve the corresponding word records.
+         *
+         * @pre `index_table` is non-null and contains valid keys for the range
+         *      [TOKEN_ID_ORIGINATE_AT_VALUE, TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used).
+         * @pre `hash_table` is non-null and each key in the above range points to a
+         *      valid non-null `WordRecord_new` object.
+         * @pre `TOKEN_ID_ORIGINATE_AT_VALUE` is a compile‑time constant that defines
+         *      the starting offset for the active portion of `index_table`.
+         *
+         * @post The sub‑range [TOKEN_ID_ORIGINATE_AT_VALUE,
+         *       TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used) of `index_table` is sorted
+         *       in **descending** order of `WordRecord_new::get_n()` (frequency count).
+         * @post For every `i` in that sub‑range, the `word_id` member of the record
+         *       pointed to by `hash_table[index_table[i]]` is equal to `i`. This is
+         *       maintained continuously throughout the sort, so no separate update
+         *       pass is needed.
+         *
+         * @par Complexity
+         *      Bubble sort has O(N²) comparisons and swaps in the worst and average
+         *      cases, where N = `bucket_used`. Best‑case (already sorted) is O(N) due
+         *      to the early‑exit flag, but the worst‑case makes this implementation
+         *      unsuitable for large input sizes. The `std::sort`‑based function is
+         *      recommended for production use because it provides O(N log N)
+         *      performance.
+         *
+         * @see descending_sort_index_table – the faster, O(N log N) alternative.
+         *
+         * @return void
+         */
+        void descending_bubble_sort_index_table(size_t* index_table,  size_t bucket_used, WordRecord_new** hash_table)
+        {
+             /*std::cout<< "Hash at 0 = " << index_table[0] << std::endl;
+             std::cout<< "Hash at 1 = " << index_table[1] << std::endl;
+             
+             std::cout<< "Hash at 3 = " << index_table[3] << std::endl;*/
+
+             for (size_t i = TOKEN_ID_ORIGINATE_AT_VALUE; i < bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE - 1; i++) // Outer loop for number of passes
+             {
+
+                bool swapped = false;
+
+                for (size_t j = TOKEN_ID_ORIGINATE_AT_VALUE; j < bucket_used + TOKEN_ID_ORIGINATE_AT_VALUE - (i - TOKEN_ID_ORIGINATE_AT_VALUE) - 1; j++) // Inner loop for comparing adjacent elements
+                {
+                    WordRecord_new* w_rec1 = hash_table[index_table[j]];
+                    WordRecord_new* w_rec2 = hash_table[index_table[j + 1]];
+
+                    //std::cout<< "Happened, "; 
+                    
+                    /*if (w_rec1->get_word() > w_rec2->get_word()) // Compare the words lexicographically
+                    {
+                        std::swap(index_table[j], index_table[j + 1]); // Swap the indices in the index table
+                    }*/
+
+                    if (w_rec2->get_n() > w_rec1->get_n()) // Compare the word IDs
+                    {   
+                        /*
+                            Update the word IDs of the WordRecord_new objects to reflect their new positions in the index table                    
+                            This upddate is necessay to maintain consistency with their new positions in the index table
+                            The word ID of the first WordRecord_new is updated to j + 1 because it is being swapped with the second WordRecord_new, which is at index j + 1 in the index table. After the swap, the first WordRecord_new will occupy the position of the second WordRecord_new, hence its new word ID should be j + 1.
+                         */
+
+                        // The first WordRecord_new's word ID is updated to j + 1 because it is being swapped with the second WordRecord_new, which is at index j + 1 in the index table. After the swap, the first WordRecord_new will occupy the position of the second WordRecord_new, hence its new word ID should be j + 1.
+                        w_rec1->word_id = j + 1; // Update the word ID of
+                        // The Secoond WordRecord_new to its new position
+                        w_rec2->word_id = j; // Update the word ID of
+
+                        // Swap the indices in the index table to reflect the new order
+                        std::swap(index_table[j], index_table[j + 1]); 
+                        swapped = true; // Mark that a swap occurred
+                    }
+                }
+
+                if (!swapped) // Check if swap pccured in the inner loop
+                {
+                    break; // If no swaps occurred, the array is already sorted
+                }
+
+                std::cout<< " Pass " << i  - TOKEN_ID_ORIGINATE_AT_VALUE << " completed." << std::endl << std::endl;
+             }
+        } 
 
         /*
          * Dynamically builds a flat, cache-friendly table of lines and their tokens.
@@ -773,6 +1039,7 @@ class Parser
                     }
                     else // Case C or D: Collision — need to probe for an empty bucket or a direct match
                     {
+                        // Linear probing starts at key+1 because the original bucket (key) was already examined
                         size_t probe = (key + 1) % bucket_count; // Linear probing
 
                         while (probe != key) // Loop until we circle back to the original key
@@ -889,6 +1156,7 @@ class Parser
                                 }                    
                                 else // Collision — need to probe for an empty bucket or a direct match
                                 {
+                                    // Linear probing starts at key+1 because the original bucket (key) was already examined
                                     size_t probe = (key + 1) % bucket_count; // Linear probing
 
                                     while (probe != key) // Loop until we circle back to the original key

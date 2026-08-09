@@ -983,6 +983,9 @@ class Parser
                 throw std::runtime_error("Parser::build_hash_table_very_new(void) Error: " + std::string(e.what()));
             }
 
+            // 1/3. Calculate the max integer limit ONCE outside the loop (or after a rehash)
+            size_t max_allowed_buckets = static_cast<size_t>(bucket_count * KEYS_LOAD_FACTOR_THRESHOLD);
+
             for (auto& line : *this)
             {
                 //std::cout<< "Processing line  with " << line.size() << " tokens." << std::endl;
@@ -1104,10 +1107,27 @@ class Parser
                     }
 
                     /*
+                        ... loop over millions of tokens ...
+
                         Check if the hash table needs to be rehashed
                         Note: Integer division would truncate the result, so we cast to double
+
+                        PLEASE NOTE:- Inefficient Double-Division Load Factor Check Inside the Inner Loop
+                                      Performing floating-point division (bucket_used / bucket_count) for every single token processed (which means million times!). 
+
                     */
-                    if ((static_cast<double>(bucket_used) / static_cast<double>(bucket_count)) > KEYS_LOAD_FACTOR_THRESHOLD)
+                    /*
+                        // 1. Executed MILLIONS of times and For every single token in corpus, the CPU has to:
+                        // 1,1 Convert bucket_used to a 64-bit double.
+                        // 1.2 Convert bucket_count to a 64-bit double.
+                        // 1.3 Perform double-precision floating-point division (/).
+                        // Compare the result against KEYS_LOAD_FACTOR_THRESHOLD.
+
+                        Floating-point division is one of the slowest basic arithmetic operations a CPU can perform (often taking 10–20+ CPU clock cycles, compared to 1 cycle for integer comparison).
+                     */
+                    //if ((static_cast<double>(bucket_used) / static_cast<double>(bucket_count)) > KEYS_LOAD_FACTOR_THRESHOLD)
+                    // 2/3. Inside the loop: STILL checked every token, but now it's a 1-cycle integer comparison!
+                    if (bucket_used > max_allowed_buckets)
                     {
                         /*
                             Rehash all existing entries into new table
@@ -1115,7 +1135,7 @@ class Parser
                         */
                         size_t old_bucket_count = bucket_count;
                         bucket_count = Keys::next_prime(bucket_count);
-
+                    
                         WordRecord_new** new_hash_table = nullptr; 
 
                         size_t* new_index_table = nullptr; // New index table for the rehashed keys
@@ -1189,6 +1209,9 @@ class Parser
 
                         delete[] *index_table; // Free old index table
                         *index_table = new_index_table; // Point to new index table
+
+                        // 3/3. Calculate the max integer limit ONCE outside the loop (or after a rehash)
+                        max_allowed_buckets = static_cast<size_t>(bucket_count * KEYS_LOAD_FACTOR_THRESHOLD);
                     }
 
                     tnt++; // Increment total token count for the corpus

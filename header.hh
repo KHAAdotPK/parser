@@ -44,6 +44,28 @@
     - ID 1: Reserved for unknown words ([UNK] token)
  */
 #define TOKEN_ID_ORIGINATE_AT_VALUE 2
+/* 
+    TOKEN_ID_ORIGINATE_AT_VALUE in BERT/GPT/Transformer context:
+    - ID 0: Reserved for padding ([PAD] token)
+    - ID 1: Reserved for unknown words ([UNK] token)
+    - ID 2: Reserved for [CLS] token (start of sequence)
+    - ID 3: Reserved for [SEP] token (separator between segments)
+    - ID 4: Reserved for [MASK] token (used in masked language modeling)
+    - IDs 5 to N+4: Reserved for your top N frequent words of vocabulary
+
+#define BERT_CLS_TOKEN_ID 2 // Reserved for [CLS] token ID, the first token of every sequence/line. It is a token marking the start of line. 
+#define BERT_SEP_TOKEN_ID 3 // Reserved for [SEP] token ID, used to separate different segments of the input sequence. It is the token marking the end of a sequence or line.
+#define BERT_MASK_TOKEN_ID 4 // Reserved for [MASK] token ID, used for masked language modeling tasks. The token is replaced with this ID during training to predict the original token. It is used for pretraining tasks like BERT's masked language modeling. The token you will randomly swap words with during training.
+
+    BERT / GPT / Transformer Initialization
+    ---------------------------------------
+    The following macro defines the maximum number of positions (tokens) that a transformer model can handle in a single input sequence. 
+    This is important for models like BERT and GPT, which have a fixed-length input representation. 
+    The value 512 is commonly used in many transformer architectures, allowing the model to process sequences of up to 512 tokens.
+
+#define BERT_MAX_POSITIONS 512
+#define BERT_EMBEDDING_SIZE 768
+ */
 
 #ifndef PARSER_PADDING_VALUE
 #define PARSER_PADDING_VALUE 0 // Reserved for padding ([PAD] token ID), 

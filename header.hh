@@ -7,6 +7,31 @@
     Maintainer: Sohail.    
  */
 
+/*    
+ * ============================================================================
+ *  IMPORTANT NOTE – PLEASE READ EVERYTHING BELOW CAREFULLY
+ * ============================================================================
+ *
+ *  THE TOKEN ID MAPPINGS, SPECIAL SENTINELS ([PAD], [UNK], [CLS], [SEP], [MASK]),
+ *  AND CONFIGURATION MACROS (MAX POSITIONS, EMBEDDING SIZE) DEFINED IN THIS
+ *  HEADER ARE STRUCTURED AROUND THE STANDARD BERT/GPT TRANSFORMER ARCHITECTURE.
+ *
+ *  HOWEVER, PLEASE BE AWARE THAT THE UNDERLYING PARSER LOGIC AND TOKEN
+ *  MANAGEMENT DEFINED BELOW ARE COMPLETELY GENERIC. THEY CAN BE USED IN ANY
+ *  CONTEXT WHERE YOU NEED TO HANDLE SEQUENTIAL TOKENS, APPLY PADDING, OR
+ *  MANAGE UNKNOWN WORDS – REGARDLESS OF THE ACTUAL MODEL ARCHITECTURE.
+ *
+ *  BUT OUR PRIMARY AND ORIGINAL INTENTION FOR DESIGNING THIS PARSER AND ITS
+ *  ASSOCIATED INPUT HANDLING WAS TO BUILD A DEDICATED INPUT PIPELINE
+ *  SPECIFICALLY FOR TRANSFORMER-TYPE MODELS (SUCH AS BERT, GPT, AND
+ *  OTHER VARIATIONS OF THE TRANSFORMER FAMILY).
+ *
+ *  WITH THAT IN MIND, PLEASE READ AND UNDERSTAND EVERY SINGLE DEFINITION AND
+ *  COMMENT PROVIDED BELOW, AS THEY FORM THE FOUNDATION OF THIS TOKENIZATION
+ *  AND INPUT PIPELINE SYSTEM.
+ * ============================================================================
+ */
+
 /*
     Limiting the vocabulary size
     ----------------------------
@@ -43,7 +68,9 @@
     - ID 0: Reserved for padding (PAIRS_PADDING_KEY)
     - ID 1: Reserved for unknown words ([UNK] token)
  */
-#define TOKEN_ID_ORIGINATE_AT_VALUE 2
+#ifndef TOKEN_ID_ORIGINATE_AT_VALUE
+#define TOKEN_ID_ORIGINATE_AT_VALUE 5 // Reserved for your top N frequent words of vocabulary. IDs 0, 1, 2, 3, 4 are reserved for special tokens.
+#endif
 /* 
     TOKEN_ID_ORIGINATE_AT_VALUE in BERT/GPT/Transformer context:
     - ID 0: Reserved for padding ([PAD] token)

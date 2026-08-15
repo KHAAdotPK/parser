@@ -567,7 +567,185 @@ class Parser
 
                 std::cout<< " Pass " << i  - TOKEN_ID_ORIGINATE_AT_VALUE << " completed." << std::endl << std::endl;
              }
-        } 
+        }
+        
+        /**
+         * @brief Serialises the parsed line table to a compact binary file.
+         *
+         * File layout:
+         *   1. LINES_TABLE_FILE_HEADER.nol  -> total number of lines in the table.
+         *   2. For each line in order:
+         *        a. size_t line_length = line->n
+         *        b. size_t keys[line_length] = line->keys[0..line_length-1]
+         *
+         * This allows the loader to rebuild an array of WORDS records without
+         * storing any additional metadata. The format is intentionally simple and
+         * is expected to be read back by the matching load_lines_table() routine.
+         *
+         * @param parser Reference to the parser instance whose metadata is used to
+         *               validate the table shape before writing.
+         * @param lines_array Pointer to the array of WORDS rows to serialise.
+         * @param ofile_name Output file path for the binary table.
+         *
+         * @throws std::runtime_error If the output file cannot be opened, the
+         *         pointer table is invalid, a line is null, a key array is null,
+         *         or any write operation fails.
+         */
+        void save_lines_table(const Parser& parser, const WORDS* const* const lines_array, const std::string& ofile_name)
+        {
+            if (lines_array == nullptr && get_nol() != 0)
+            {
+                throw std::runtime_error("Parser::save_lines_table(const Parser&, const WORDS* const*, const std::string&) Error: lines_array pointer is null while parser reports non-zero line count");
+            }
+
+            std::ofstream ofile(ofile_name, std::ios::out | std::ios::binary);
+            if (!ofile.is_open())
+            {
+                throw std::runtime_error("Parser::save_lines_table(const Parser&, const WORDS* const* const, const std::string&) Error: failed to open file for writing");
+            }
+
+            LINES_TABLE_FILE_HEADER header = { get_nol() };
+
+            ofile.write(reinterpret_cast<const char*>(&header.nol), sizeof(header.nol));
+            if (!ofile)
+            {
+                throw std::runtime_error("Parser::save_lines_table(const Parser&, const WORDS* const* const, const std::string&) Error: failed to write header");
+            }
+
+            for (size_t i = 0; i < header.nol; i++)
+            {
+                const WORDS* line = lines_array[i];
+                if (line == nullptr)
+                {
+                    throw std::runtime_error(std::string("Parser::save_lines_table(const Parser&, const WORDS* const* const, const std::string&) Error: null WORDS at lines_array[") + std::to_string(i) + "]");
+                }
+
+                if (line->keys == nullptr)
+                {
+                    throw std::runtime_error(std::string("Parser::save_lines_table(const Parser&, const WORDS* const* const, const std::string&) Error: null keys at lines_array[") + std::to_string(i) + "]");
+                }
+
+                ofile.write(reinterpret_cast<const char*>(&line->n), sizeof(size_t));
+                if (!ofile)
+                {
+                    throw std::runtime_error(std::string("Parser::save_lines_table(const Parser&, const WORDS* const* const, const std::string&) Error: failed to write line length at index ") + std::to_string(i));
+                }
+
+                for (size_t j = 0; j < line->n; j++)
+                {
+                    ofile.write(reinterpret_cast<const char*>(&line->keys[j]), sizeof(size_t));
+                    if (!ofile)
+                    {
+                        throw std::runtime_error(std::string("Parser::save_lines_table(const Parser&, const WORDS* const* const, const std::string&) Error: failed to write key at lines_array[") + std::to_string(i) + "][" + std::to_string(j) + "]");
+                    }
+                }
+            }
+
+            ofile.flush();
+            if (!ofile)
+            {
+                throw std::runtime_error("Parser::save_lines_table(const Parser&, const WORDS* const* const, const std::string&) Error: failed to flush file");
+            }
+
+            ofile.close();
+            if (ofile.is_open())
+            {
+                throw std::runtime_error("Parser::save_lines_table(Parser&, WORDS**, const std::string&) Error: failed to close file");
+            }
+        }
+
+        /**
+         * @brief Deserialises a previously saved binary line table into memory.
+         *
+         * Expected file format:
+         *   1. LINES_TABLE_FILE_HEADER.nol  -> number of rows in the table.
+         *   2. For each line:
+         *        a. size_t line_length
+         *        b. size_t keys[line_length]
+         *
+         * Each line is reconstructed as a fresh WORDS object and appended to a
+         * dynamically allocated array of WORDS pointers. The returned value is the
+         * number of lines restored, matching the file header.
+         *
+         * @param lines_array Output pointer that receives the newly allocated array
+         *                   of WORDS pointers.
+         * @param ifile_name Input binary file path.
+         *
+         * @return The number of lines loaded from the file.
+         *
+         * @throws std::runtime_error If the file cannot be opened, the header or
+         *         any line payload is truncated, memory allocation fails, or the
+         *         stream cannot be closed cleanly.
+         */
+        size_t load_lines_table(WORDS*** lines_array, const std::string& ifile_name)
+        {
+            std::ifstream ifile(ifile_name, std::ios::in | std::ios::binary);
+            if (!ifile.is_open())
+            {
+                throw std::runtime_error("Parser::load_lines_table(WORDS***, const std::string&) Error: failed to open file for reading");
+            }  
+            
+            LINES_TABLE_FILE_HEADER header = { 0 };
+
+            ifile.read(reinterpret_cast<char*>(&header.nol), sizeof(header.nol));
+            if (!ifile)
+            {
+                throw std::runtime_error("Parser::load_lines_table(WORDS***, const std::string&) Error: failed to read the header");
+            }
+
+            try
+            {
+                *lines_array = new WORDS*[header.nol];
+            }
+            catch (const std::bad_alloc& e)
+            {
+                *lines_array = nullptr;
+                throw std::runtime_error("Parser::load_lines_table(WORDS***, const std::string&) Error: " + std::string(e.what()));
+            }
+            
+            for (size_t i = 0; i < header.nol; i++)
+            {
+                WORDS* line = new WORDS();
+                if (line == nullptr)
+                {   
+                    throw std::runtime_error("Parser::load_lines_table(WORDS***, const std::string&) Error: null WORDS at lines_array[" + std::to_string(i) + "]");
+                }
+
+                ifile.read(reinterpret_cast<char*>(&line->n), sizeof(line->n));
+                if (!ifile.is_open())
+                {
+                    delete line;
+                    throw std::runtime_error("Parser::load_lines_table(WORDS***, const std::string&) Error: failed to read from file");
+                }
+
+                
+                line->keys = new (std::nothrow) size_t[line->n];
+                if (line->keys == nullptr)
+                {
+                    delete line;
+                    throw std::runtime_error("Parser::load_lines_table(WORDS***, const std::string&) Error: allocation failed for keys");
+                }
+                                                                
+                for ( size_t j = 0; j < line->n; j++)
+                {
+                    ifile.read(reinterpret_cast<char*>(&line->keys[j]), sizeof(size_t));
+                    if (!ifile)
+                    {
+                        throw std::runtime_error("Parser::load_lines_table(WORDS***, const std::string&) Error: truncated line data, keys are not completely built");
+                    }
+                }
+
+                *(*lines_array + i) = line;
+            }
+
+            ifile.close();
+            if (ifile.is_open())
+            {
+                throw std::runtime_error("Parser::load_lines_table(WORDS***, const std::string&) Error: failed to close file");
+            }
+            
+            return header.nol;
+        }   
 
         /*
          * Dynamically builds a flat, cache-friendly table of lines and their tokens.

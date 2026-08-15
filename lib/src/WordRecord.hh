@@ -16,6 +16,12 @@
 struct Line; 
 struct OccurrenceNode;
 
+struct WordsHeader 
+{
+    size_t nol; // Number of lines
+};
+typedef struct WordsHeader LINES_TABLE_FILE_HEADER;
+
 struct WordRecord_new
 {
     size_t word_id;         // unique integer assigned to this word, index into "word_id_to_hash table"

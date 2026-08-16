@@ -568,6 +568,144 @@ class Parser
                 std::cout<< " Pass " << i  - TOKEN_ID_ORIGINATE_AT_VALUE << " completed." << std::endl << std::endl;
              }
         }
+
+        /**
+         * @brief Saves an index table to a binary file, along with a header containing
+         *        metadata from the current parser state.
+         *
+         * The method writes a fixed header (`INDEX_TABLE_FILE_HEADER`) followed by the
+         * raw binary data of the index table. The header includes the current bucket
+         * count (`bucket_used`) and a fixed origin token ID. The file is flushed and
+         * closed; any failure at any step results in an exception.
+         *
+         * @param parser      A reference to a `Parser` object (currently unused, but
+         *                    retained for interface consistency).
+         * @param index_table Pointer to the `size_t` array containing the index table
+         *                    to be saved. If `index_table` is `nullptr` while the
+         *                    parser reports a non-zero bucket count, an exception is
+         *                    thrown.
+         * @param ofile_name  Path to the output binary file to be created or overwritten.
+         *
+         * @throw std::runtime_error if any of the following conditions are met:
+         *         - `index_table` is `nullptr` but the current bucket count is non-zero.
+         *         - The output file cannot be opened for writing.
+         *         - Writing the header or the table data fails.
+         *         - Flushing the output stream fails.
+         *         - Closing the file fails (checked via `is_open()` after `close()`).
+         *
+         * @note The file format is binary and platform-dependent. It uses the native
+         *       memory representation of `size_t` and the header struct.
+         * @warning The method assumes the `index_table` pointer is valid and points to
+         *          at least `bucket_used` elements when the bucket count is non-zero.
+         *          Passing a null pointer with a zero bucket count is allowed (no data
+         *          is written beyond the header).
+         * @note The `parser` parameter is currently not used; it may be reserved for
+         *       future use or for maintaining a consistent API.
+         */
+        void save_index_table(const Parser& parser, size_t const * index_table, const std::string& ofile_name) const
+        {
+            if (index_table == nullptr && get_bucket_used() != 0)
+            {
+                throw std::runtime_error("Parser::save_index_table(const Parser&, size_t const *, const std::string&) Error: index table pointer is null while parser reports non-zero buckets count");
+            }   
+            
+            std::ofstream ofile(ofile_name, std::ios::out | std::ios::binary);
+            if (!ofile.is_open())
+            {
+                throw std::runtime_error("Parser::save_index_table(const Parser&, size_t const *, const std::string&) Error: failed to open file for writing");
+            }
+
+            INDEX_TABLE_FILE_HEADER header = {TOKEN_ID_ORIGINATE_AT_VALUE, bucket_used};
+
+            ofile.write(reinterpret_cast<const char*>(&header), sizeof(header));
+            if (!ofile)
+            {
+                throw std::runtime_error("Parser::save_index_table(const Parser&, size_t const *, const std::string&) Error: failed to write header");
+            }
+
+            // Save the index table
+            ofile.write(reinterpret_cast<const char*>(index_table), bucket_used * sizeof(size_t));
+            if (!ofile)
+            {
+                throw std::runtime_error("Parser::save_index_table(const Parser&, size_t const *, const std::string&) Error: failed to write index table");
+            }
+
+            ofile.flush();
+            if (!ofile)
+            {
+                throw std::runtime_error("Parser::save_index_table(const Parser&, size_t const *, const std::string&) Error: failed to flush file");
+            }
+
+            ofile.close();
+            if (ofile.is_open())
+            {
+                throw std::runtime_error("Parser::save_lines_table(Parser&, size_t const *, const std::string&) Error: failed to close file");
+            }
+        }
+
+        /**
+         * @brief Loads an index table from a binary file into dynamically allocated memory.
+         *
+         * This method opens the specified binary file, reads its header to determine
+         * the number of elements, allocates a raw array of `size_t` on the heap, and
+         * then reads the table data directly into that buffer. The caller is responsible
+         * for deallocating the allocated memory using `delete[]`.
+         *
+         * @param index_table  [out] Pointer to a pointer that will be set to the
+         *                     address of the newly allocated array. Must not be null.
+         * @param ifile_name   The path to the binary index file to be read.
+         *
+         * @return INDEX_TABLE_FILE_HEADER The header structure read from the file,
+         *         containing metadata about the loaded table.
+         *
+         * @throw std::runtime_error If the file cannot be opened, the header or data
+         *         cannot be read, memory allocation fails, or the file cannot be closed.
+         *         In the event of a data-read failure, the allocated memory is freed
+         *         automatically before the exception is propagated.
+         *
+         * @note The file format is binary and platform-dependent; it assumes the same
+         *       endianness and `size_t` representation as the running system.
+         * @warning The caller takes ownership of the allocated buffer and must free it
+         *          using `delete[]` when no longer needed.
+         */
+        INDEX_TABLE_FILE_HEADER load_index_table(size_t** index_table, const std::string& ifile_name) const
+        {
+            std::ifstream ifile(ifile_name, std::ios::in | std::ios::binary);
+            if (!ifile.is_open())
+            {
+                throw std::runtime_error("Parser::load_index_table(size_t**, const std::string&) Error: failed to open file for reading");
+            }
+                        
+            INDEX_TABLE_FILE_HEADER header = {0, 0};
+
+            ifile.read(reinterpret_cast<char*>(&header), sizeof(header));
+            if (!ifile)
+            {
+                throw std::runtime_error("Parser::load_index_table(size_t**, const std::string&) Error: failed to read the header");
+            }
+
+            *index_table = new (std::nothrow) size_t[header.bu]();
+            if (*index_table == nullptr)
+            {
+                throw std::runtime_error("Parser::load_index_table(size_t**, const std::string&) Error: allocation failed for index table");   
+            }
+
+            ifile.read(reinterpret_cast<char*>(*index_table), sizeof(size_t)*header.bu);
+            if (!ifile)
+            {
+                delete[] *index_table;
+                *index_table = nullptr;
+                throw std::runtime_error("Parser::load_index_table(size_t**, const std::string&) Error: failed to read the index table");
+            } 
+
+            ifile.close();
+            if (ifile.is_open())
+            {
+                throw std::runtime_error("Parser::load_index_table(size_t**, const std::string&) Error: failed to close file");
+            }
+
+            return header;
+        }
         
         /**
          * @brief Serialises the parsed line table to a compact binary file.
@@ -595,7 +733,7 @@ class Parser
         {
             if (lines_array == nullptr && get_nol() != 0)
             {
-                throw std::runtime_error("Parser::save_lines_table(const Parser&, const WORDS* const*, const std::string&) Error: lines_array pointer is null while parser reports non-zero line count");
+                throw std::runtime_error("Parser::save_lines_table(const Parser&, const WORDS* const*, const std::string&) Error: lines table pointer is null while parser reports non-zero line count");
             }
 
             std::ofstream ofile(ofile_name, std::ios::out | std::ios::binary);
@@ -650,7 +788,7 @@ class Parser
             ofile.close();
             if (ofile.is_open())
             {
-                throw std::runtime_error("Parser::save_lines_table(Parser&, WORDS**, const std::string&) Error: failed to close file");
+                throw std::runtime_error("Parser::save_lines_table(Parser&, const WORDS* const* const, const std::string&) Error: failed to close file");
             }
         }
 

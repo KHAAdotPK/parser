@@ -570,6 +570,184 @@ class Parser
         }
 
         /**
+         * @brief Saves the vocabulary hash table to a binary file.
+         *
+         * File layout:
+         *   1. INDEX_TABLE_FILE_HEADER  -> containing tioav, bu, and bc.
+         *   2. For each bucket in the hash table (up to header.bc):
+         *        a. size_t word_id (0 if empty/nullptr, otherwise the word's unique ID).
+         *        b. size_t word_length (only if word_id != 0).
+         *        c. char word_data[word_length] (only if word_length > 0).
+         *        d. size_t occurrence_count (only if word_id != 0).
+         *
+         * @param hash_table   Pointer to an array of pointers to WordRecord_new objects.
+         * @param index_table  Pointer to the array containing the index table keys.
+         * @param header       The header containing metadata structure for validation and size.
+         * @param ofile_name   Path to the binary output file.
+         *
+         * @throws std::runtime_error if any validation check fails or write fails.
+         */
+        void save_hash_table(const WordRecord_new* const* hash_table, const size_t* index_table, const INDEX_TABLE_FILE_HEADER& header, const std::string ofile_name) const
+        {
+            if (hash_table == nullptr && (header.bu != 0 || header.bc != 0))
+            {
+                throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: hash table pointer is null while parser reports non-zero buckets count");
+            }
+            
+            if (index_table == nullptr && header.bu != 0)
+            {
+                throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: index table pointer is null while parser reports non-zero buckets count");
+            }
+
+            std::ofstream ofile(ofile_name, std::ios::out | std::ios::binary);
+            if (!ofile.is_open())
+            {
+                throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: failed to open output file for writing");
+            }
+
+            ofile.write(reinterpret_cast<const char*>(&header), sizeof(INDEX_TABLE_FILE_HEADER));
+            if (!ofile)
+            {
+                throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: failed to write header to output file");
+            }
+
+            for (size_t i = 0; i < header.bc; i++)
+            {
+                if (hash_table[i] != nullptr)                
+                {
+                    ofile.write(reinterpret_cast<const char*>(&hash_table[i]->word_id), sizeof(size_t));
+                    if (!ofile)
+                    {
+                        throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: failed to write word_id to output file");
+                    }                    
+                    
+                    size_t length = hash_table[i]->word.length();
+
+                    ofile.write(reinterpret_cast<const char*>(&length), sizeof(size_t));
+                    if (!ofile)
+                    {
+                        throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: failed to write length to output file");
+                    }
+
+                    ofile.write(reinterpret_cast<const char*>(hash_table[i]->word.c_str()), hash_table[i]->word.length());
+                    if (!ofile)
+                    {
+                        throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: failed to write word_id to output file");
+                    }
+                                        
+                    ofile.write(reinterpret_cast<const char*>(&hash_table[i]->n), sizeof(size_t));
+                    if (!ofile)
+                    {
+                        throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: failed to write n to output file");
+                    }
+                }
+                else
+                {
+                    size_t word_id = 0;
+                    ofile.write(reinterpret_cast<const char*>(&word_id), sizeof(size_t));
+                    if (!ofile)
+                    {
+                        throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: failed to write word_id to output file, for hash_table[i] == nullptr");
+                    }
+                }
+            }
+
+            ofile.flush();
+            if (!ofile)
+            {
+                throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: failed to flush output file");
+            }
+
+            ofile.close();
+            if (!ofile)
+            {
+                throw std::runtime_error("Parser::save_hash_table(const WordRecord_new* const*, const size_t*, const INDEX_TABLE_FILE_HEADER&, const std::string) Error: failed to close output file");
+            }
+        }
+
+        WordRecord_new** /*INDEX_TABLE_FILE_HEADER*/ load_hash_table(const size_t* index_table, /*const INDEX_TABLE_FILE_HEADER& header,*/ const std::string ifile_name) const
+        {
+            /*if (index_table == nullptr && get_bucket_used() != 0)
+            {
+                throw std::runtime_error("Parser::load_hash_table(size_t const *, const INDEX_TABLE_FILE_HEADER&, const std::string&) Error: index table pointer is null while parser reports non-zero buckets count");
+            }*/
+
+            std::ifstream ifile(ifile_name, std::ios::in | std::ios::binary);
+            if (!ifile.is_open())
+            {
+                throw std::runtime_error("Parser::load_index_table(const std::string&) Error: failed to open file for reading");
+            }
+
+            INDEX_TABLE_FILE_HEADER header = {0, 0, 0};
+
+            ifile.read(reinterpret_cast<char*>(&header), sizeof(header));
+            if (!ifile)
+            {
+                throw std::runtime_error("Parser::load_hash_table(const std::string ifile_name) Error: failed to read the header");
+            }
+
+            WordRecord_new** hash_table = nullptr;
+            
+            if (header.bc != 0)
+            {
+                hash_table = new (std::nothrow) WordRecord_new*[header.bc];
+                if (hash_table == nullptr)
+                {
+                    throw std::runtime_error("Parser::load_hash_table(const std::string ifile_name) Error: allocation failed for hash table");
+                }
+            }            
+            // If bc == 0, hash_table remains nullptr, and we *don't* throw.
+
+            for (size_t i = 0; i < header.bc; i++)
+            {
+                size_t word_id = 0;
+                ifile.read(reinterpret_cast<char*>(&word_id), sizeof(size_t));
+                if (!ifile)
+                {
+                    throw std::runtime_error("Parser::load_hash_table(const std::string ifile_name) Error: failed to read the word_id");
+                }
+                
+                if (word_id == 0)
+                {
+                    hash_table[i] = nullptr;
+                }
+                else
+                {
+                    size_t length = 0;
+                    ifile.read(reinterpret_cast<char*>(&length), sizeof(size_t));
+                    if (!ifile)
+                    {
+                        throw std::runtime_error("Parser::load_hash_table(const std::string ifile_name) Error: failed to read the length");
+                    }
+                    
+                    std::string word(length, '\0');
+                    ifile.read(reinterpret_cast<char*>(&word[0]), length);
+                    if (!ifile)
+                    {
+                        throw std::runtime_error("Parser::load_hash_table(const std::string ifile_name) Error: failed to read the word");
+                    }
+                    
+                    size_t n = 0;
+                    ifile.read(reinterpret_cast<char*>(&n), sizeof(size_t));
+                    if (!ifile)
+                    {
+                        throw std::runtime_error("Parser::load_hash_table(const std::string ifile_name) Error: failed to read the n");
+                    }
+                    
+                    hash_table[i] = new (std::nothrow) WordRecord_new(word_id, word, n);
+                    if (hash_table[i] == nullptr)
+                    {
+                        throw std::runtime_error("Parser::load_hash_table(const std::string ifile_name) Error: allocation failed for word record");
+                    }
+                }
+            }
+    
+            return hash_table;
+
+            //return header;
+        }
+
+        /**
          * @brief Saves an index table to a binary file, along with a header containing
          *        metadata from the current parser state.
          *
@@ -615,7 +793,7 @@ class Parser
                 throw std::runtime_error("Parser::save_index_table(const Parser&, size_t const *, const std::string&) Error: failed to open file for writing");
             }
 
-            INDEX_TABLE_FILE_HEADER header = {TOKEN_ID_ORIGINATE_AT_VALUE, bucket_used};
+            INDEX_TABLE_FILE_HEADER header = {TOKEN_ID_ORIGINATE_AT_VALUE, get_bucket_used(), get_bucket_count()};
 
             ofile.write(reinterpret_cast<const char*>(&header), sizeof(header));
             if (!ofile)
@@ -676,7 +854,7 @@ class Parser
                 throw std::runtime_error("Parser::load_index_table(size_t**, const std::string&) Error: failed to open file for reading");
             }
                         
-            INDEX_TABLE_FILE_HEADER header = {0, 0};
+            INDEX_TABLE_FILE_HEADER header = {0, 0, 0};
 
             ifile.read(reinterpret_cast<char*>(&header), sizeof(header));
             if (!ifile)

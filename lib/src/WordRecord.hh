@@ -25,7 +25,8 @@ typedef struct WordsHeader LINES_TABLE_FILE_HEADER;
 struct IndexHeader
 {
     size_t tioav; // Token ID Originate At Vaue, declared by macro TOKEN_ID_ORIGINATE_AT_VALUE 
-    size_t bu;   // Buckets Used     
+    size_t bu;    // Buckets Used 
+    size_t bc;    // Bucket Count, total number of buckets allocated and bucket used is sub set     
 };
 typedef struct IndexHeader INDEX_TABLE_FILE_HEADER;
 

@@ -709,7 +709,7 @@ class Parser
          * @note   Caller must deallocate the allocated hash table and all WordRecord_new
          *         objects when no longer needed. If header.bc == 0, *hash_table remains nullptr.
          */
-        INDEX_TABLE_FILE_HEADER load_hash_table(WordRecord_new*** hash_table, const std::string ifile_name) const
+        static INDEX_TABLE_FILE_HEADER load_hash_table(WordRecord_new*** hash_table, const std::string ifile_name)
         {            
             std::ifstream ifile(ifile_name, std::ios::in | std::ios::binary);
             if (!ifile.is_open())
@@ -718,6 +718,9 @@ class Parser
             }
 
             INDEX_TABLE_FILE_HEADER header = {0, 0, 0};
+
+            // Blindly assigning nullptr
+            *hash_table = nullptr;
 
             ifile.read(reinterpret_cast<char*>(&header), sizeof(header));
             if (!ifile)
@@ -881,7 +884,7 @@ class Parser
          * @warning The caller takes ownership of the allocated buffer and must free it
          *          using `delete[]` when no longer needed.
          */
-        INDEX_TABLE_FILE_HEADER load_index_table(size_t** index_table, const std::string& ifile_name) const
+        static INDEX_TABLE_FILE_HEADER load_index_table(size_t** index_table, const std::string& ifile_name)
         {
             std::ifstream ifile(ifile_name, std::ios::in | std::ios::binary);
             if (!ifile.is_open())
@@ -1028,7 +1031,7 @@ class Parser
          *         any line payload is truncated, memory allocation fails, or the
          *         stream cannot be closed cleanly.
          */
-        size_t load_lines_table(WORDS*** lines_array, const std::string& ifile_name)
+        static LINES_TABLE_FILE_HEADER load_lines_table(WORDS*** lines_array, const std::string& ifile_name)
         {
             std::ifstream ifile(ifile_name, std::ios::in | std::ios::binary);
             if (!ifile.is_open())
@@ -1095,7 +1098,7 @@ class Parser
                 throw std::runtime_error("Parser::load_lines_table(WORDS***, const std::string&) Error: failed to close file");
             }
             
-            return header.nol;
+            return header;
         }   
 
         /*

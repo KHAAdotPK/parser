@@ -119,6 +119,74 @@ class Parser
             }
         }
 
+        static void free_tables_very_new(WordRecord_new** hash_table, WORDS** lines_array, size_t* index_table, INDEX_TABLE_FILE_HEADER iheader, LINES_TABLE_FILE_HEADER lheader)
+         {
+             // ==================== FREE HASH TABLE ====================
+             // Only attempt to free if the pointer is not null.
+             if (hash_table != nullptr)
+             {
+                // Get the number of buckets. This function is assumed to be safe
+                // even if hash_table is null (returns 0). If it is not, we are in
+                // undefined territory – but we've already checked null above.
+                size_t bucket_count =  iheader.bc /*get_bucket_count()*/;
+
+                // Iterate over each bucket and delete the WordRecord_new object.
+                for (size_t i = 0; i < bucket_count; ++i)
+                {
+                    WordRecord_new* record = hash_table[i];
+                    if (record != nullptr)
+                    {
+                        delete record;          // Destructor should clean up its own members
+                        hash_table[i] = nullptr; // Avoid dangling pointer (defensive)
+                    }
+                }
+
+                // Delete the array of pointers itself.
+                delete[] hash_table;   // NOT delete – we allocated with new[]
+                // The parameter is local; setting it to nullptr does not affect the caller's
+                // pointer. We do it only to avoid accidental use inside this function.
+                // Caller should still set their own pointer to nullptr after the call.
+                hash_table = nullptr;
+            }
+            // else: hash_table is null, nothing to free.
+
+            // ==================== FREE LINES ARRAY ====================
+            if (lines_array != nullptr)
+            {
+                size_t num_lines = lheader.nol /*get_nol()*/; // Assumed safe even if lines_array is null
+
+                for (size_t i = 0; i < num_lines; ++i)
+                {
+                    WORDS* line = lines_array[i];
+                    if (line != nullptr)
+                    {
+                        // Free the internal 'keys' array if present.
+                        if (line->keys != nullptr)
+                        {
+                            delete[] line->keys; // assuming keys was allocated with new[]
+                            line->keys = nullptr;
+                        }
+
+                        delete line;          // Destructor should clean up other members
+                        lines_array[i] = nullptr;
+                    }
+                }
+
+                delete[] lines_array;   // array of pointers, so delete[]
+                lines_array = nullptr;
+            }
+
+            // ==================== FREE INDEX TABLE ====================
+            // index_table may be an array or a single size_t; we assume it was allocated
+            // with new[] (common for arrays). If it was a single object, use delete.
+            // We choose delete[] here (adjust if needed).
+            if (index_table != nullptr)
+            {
+                delete[] index_table;   // or delete index_table; – caller must guarantee match
+                index_table = nullptr;
+            }
+        }
+
         /**
          * @brief Frees all dynamically allocated memory associated with the hash table,
          *        the lines array, and the index table.
@@ -840,7 +908,8 @@ class Parser
             }
 
             // Save the index table
-            ofile.write(reinterpret_cast<const char*>(index_table), bucket_used * sizeof(size_t));
+            //ofile.write(reinterpret_cast<const char*>(index_table), (bucket_used + header.tioav)*sizeof(size_t)); // For documentation
+            ofile.write(reinterpret_cast<const char*>(index_table), (bucket_count + TOKEN_ID_ORIGINATE_AT_VALUE)*sizeof(size_t)); // For consistancy
             if (!ofile)
             {
                 throw std::runtime_error("Parser::save_index_table(const Parser&, size_t const *, const std::string&) Error: failed to write index table");
@@ -900,13 +969,15 @@ class Parser
                 throw std::runtime_error("Parser::load_index_table(size_t**, const std::string&) Error: failed to read the header");
             }
 
-            *index_table = new (std::nothrow) size_t[header.bu]();
+            //*index_table = new (std::nothrow) size_t[header.bu + header.tioav]();
+            *index_table = new (std::nothrow) size_t[header.bc + header.tioav]();
             if (*index_table == nullptr)
             {
                 throw std::runtime_error("Parser::load_index_table(size_t**, const std::string&) Error: allocation failed for index table");   
             }
 
-            ifile.read(reinterpret_cast<char*>(*index_table), sizeof(size_t)*header.bu);
+            //ifile.read(reinterpret_cast<char*>(*index_table), sizeof(size_t)*(header.bu + header.tioav));
+            ifile.read(reinterpret_cast<char*>(*index_table), sizeof(size_t)*(header.bc + header.tioav));
             if (!ifile)
             {
                 delete[] *index_table;
@@ -1504,8 +1575,9 @@ class Parser
                  * (hash_table[key] == nullptr) check for unique words becomes undefined behaviour.
                  */
 
-                *index_table = new size_t[bucket_count + TOKEN_ID_ORIGINATE_AT_VALUE](); // Create array of hashed keys (size_t) and return address of first element of the array
-                                                                                         // The + TOKEN_ID_ORIGINATE_AT_VALUE is to accommodate the offset for word IDs starting at TOKEN_ID_ORIGINATE_AT_VALUE (typically 1) rather than 0. This ensures that the index_table can store keys for all unique words, including the first one.   
+                *index_table = new size_t[bucket_count + TOKEN_ID_ORIGINATE_AT_VALUE](); // Create array of hashed keys (size_t) and return address of the first element.
+                                                                                         // The + TOKEN_ID_ORIGINATE_AT_VALUE reserves the special-token range below the first active vocabulary ID,
+                                                                                         // so valid word IDs are stored in the range [TOKEN_ID_ORIGINATE_AT_VALUE, TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used).
                 /*
                  * The () at the end is critical — it zero-initialises every entry of this array to zero.
                  */
@@ -1681,8 +1753,9 @@ class Parser
                              * (hash_table[key] == nullptr) check for unique words becomes undefined behaviour.
                              */
 
-                            new_index_table = new size_t[bucket_count + TOKEN_ID_ORIGINATE_AT_VALUE](); // Create new index table with updated bucket count
-                                                                                                        // The + TOKEN_ID_ORIGINATE_AT_VALUE is to accommodate the offset for word IDs starting at TOKEN_ID_ORIGINATE_AT_VALUE (typically 1) rather than 0. This ensures that the index_table can store keys for all unique words, including the first one.            
+                            new_index_table = new size_t[bucket_count + TOKEN_ID_ORIGINATE_AT_VALUE](); // Create new index table with updated bucket count.
+                                                                                                        // The offset reserves the sentinel range below the first active vocabulary ID,
+                                                                                                        // so valid word IDs remain in the range [TOKEN_ID_ORIGINATE_AT_VALUE, TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used).
                             /*
                                 * The () at the end is critical — it zero-initialises every entry of this array to zero.
                              */

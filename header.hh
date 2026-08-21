@@ -57,39 +57,49 @@
 #define CSV_PARSER_LIB_PARSER_HEADER_HH
 
 /*
-    [PAD] and [UNK] Special Sentinels
-    ---------------------------------
-    The following macro defines the starting value for token IDs in the corpus. 
-    Token IDs are used to uniquely identify tokens (words or symbols) in the corpus data. 
-    By setting this value to 2, we ensure that the first valid token ID starts from 2, 
-    leaving 0, 1 available for special cases (e.g., padding and unknown tokens).
+   [PAD] / [UNK] / [CLS] / [SEP] / [MASK] reserved range
+   -----------------------------------------------------
+   TOKEN_ID_ORIGINATE_AT_VALUE defines the first valid vocabulary ID. It is an
+   offset, not a dense zero-based vocabulary index. Values below this offset are
+   reserved for special sentinel slots.
 
-    IDs 2 to N+1: Reserved for your top N frequent words of vocabulary.        
-    - ID 0: Reserved for padding (PAIRS_PADDING_KEY)
-    - ID 1: Reserved for unknown words ([UNK] token)
+   With the current default value of 5:
+   - ID 0: Reserved for padding ([PAD])
+   - ID 1: Reserved for unknown words ([UNK])
+   - ID 2: Reserved for [CLS]
+   - ID 3: Reserved for [SEP]
+   - ID 4: Reserved for [MASK]
+   - IDs 5 .. 5 + bucket_used - 1: Active vocabulary IDs
+
+   The valid vocabulary range is therefore:
+       [TOKEN_ID_ORIGINATE_AT_VALUE, TOKEN_ID_ORIGINATE_AT_VALUE + bucket_used)
+
+   This is intentionally different from a dense 0-based vocabulary index and is
+   used by the parser's index table to keep special sentinel values out of the
+   active vocabulary range.
  */
 #ifndef TOKEN_ID_ORIGINATE_AT_VALUE
-#define TOKEN_ID_ORIGINATE_AT_VALUE 5 // Reserved for your top N frequent words of vocabulary. IDs 0, 1, 2, 3, 4 are reserved for special tokens.
+#define TOKEN_ID_ORIGINATE_AT_VALUE 5 // First active vocabulary ID. IDs 0..4 are reserved special tokens.
 #endif
 /* 
-    TOKEN_ID_ORIGINATE_AT_VALUE in BERT/GPT/Transformer context:
-    - ID 0: Reserved for padding ([PAD] token)
-    - ID 1: Reserved for unknown words ([UNK] token)
-    - ID 2: Reserved for [CLS] token (start of sequence)
-    - ID 3: Reserved for [SEP] token (separator between segments)
-    - ID 4: Reserved for [MASK] token (used in masked language modeling)
-    - IDs 5 to N+4: Reserved for your top N frequent words of vocabulary
+   TOKEN_ID_ORIGINATE_AT_VALUE in BERT/GPT/Transformer context:
+   - ID 0: Reserved for padding ([PAD] token)
+   - ID 1: Reserved for unknown words ([UNK] token)
+   - ID 2: Reserved for [CLS] token (start of sequence)
+   - ID 3: Reserved for [SEP] token (separator between segments)
+   - ID 4: Reserved for [MASK] token (used in masked language modeling)
+   - IDs 5 and above: Active vocabulary IDs, offset by this macro
 
-#define BERT_CLS_TOKEN_ID 2 // Reserved for [CLS] token ID, the first token of every sequence/line. It is a token marking the start of line. 
-#define BERT_SEP_TOKEN_ID 3 // Reserved for [SEP] token ID, used to separate different segments of the input sequence. It is the token marking the end of a sequence or line.
-#define BERT_MASK_TOKEN_ID 4 // Reserved for [MASK] token ID, used for masked language modeling tasks. The token is replaced with this ID during training to predict the original token. It is used for pretraining tasks like BERT's masked language modeling. The token you will randomly swap words with during training.
-
-    BERT / GPT / Transformer Initialization
-    ---------------------------------------
-    The following macro defines the maximum number of positions (tokens) that a transformer model can handle in a single input sequence. 
-    This is important for models like BERT and GPT, which have a fixed-length input representation. 
-    The value 512 is commonly used in many transformer architectures, allowing the model to process sequences of up to 512 tokens.
-
+#define BERT_CLS_TOKEN_ID 2 // Reserved for [CLS] token ID, the first token of every sequence/line.
+#define BERT_SEP_TOKEN_ID 3 // Reserved for [SEP] token ID, used to separate different segments of the input sequence.
+#define BERT_MASK_TOKEN_ID 4 // Reserved for [MASK] token ID, used for masked language modeling tasks.
+ 
+   BERT / GPT / Transformer Initialization
+   ---------------------------------------
+   The following macro defines the maximum number of positions (tokens) that a transformer model can handle in a single input sequence.
+   This is important for models like BERT and GPT, which have a fixed-length input representation.
+   The value 512 is commonly used in many transformer architectures, allowing the model to process sequences of up to 512 tokens.
+ 
 #define BERT_MAX_POSITIONS 512
 #define BERT_EMBEDDING_SIZE 768
  */

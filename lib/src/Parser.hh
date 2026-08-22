@@ -281,7 +281,6 @@ class Parser
         // Constructors
         Parser() : _ifile_name(), _ifile(), _is_open(false), bucket_count(0), bucket_used(0), mxntpl(0), mnntpl(std::numeric_limits<size_t>::max()), nol(0), tnt(0)  /*,bucket_count(size_t(KEYS_COMMON_STARTING_SIZE)), buckets_used(0),*/ /*hash_table(nullptr), index_table(nullptr), line_number(0), token_number(0)*/   
         {
-
         }
 
         explicit Parser(const std::string& iname/*, const std::string& oname*/) : _ifile_name(iname), _ifile(), _is_open(false), bucket_count(0), bucket_used(0), mxntpl(0), mnntpl(std::numeric_limits<size_t>::max()), nol(0), tnt(0) /*, bucket_count(size_t(KEYS_COMMON_STARTING_SIZE)), buckets_used(0),*/ /*hash_table(nullptr), index_table(nullptr), line_number(0), token_number(0)*/
@@ -314,9 +313,77 @@ class Parser
             }
         }
 
-        // Non‑copyable because of file stream
-        Parser(const Parser&) = delete;
-        Parser& operator=(const Parser&) = delete;
+        /*
+            PLEASE NOTE:- 
+            Transfers ownership of the file stream from the
+            source object to the destination object. The source object is left
+            in a valid but unspecified state (specifically, its _is_open flag is
+            set to false and its stream is left in a state where it no longer
+            owns the file). This is a noexcept operation because it only involves
+            moving member variables and does not throw exceptions.
+        */
+
+        // Make Parser non-copyable but movable.
+        Parser(const Parser&) = delete; // Copy Constructor, non-copyable due to ifstream 
+        Parser& operator=(const Parser&) = delete; // Copy Assignment Operator, non-assignable due to ifstream 
+        Parser(Parser&&) = default; // Move Constructor, move-constructible due to ifstream 
+        Parser& operator=(Parser&&) = default; // Move Assignment Operator, move-assignable due to ifstream 
+
+        // Copy Assignment Operator, Just for documentation purposes (Don't use it)
+        // Just to show that composites with ifstream properties can be made copy-able (using the move semantics)
+        /*
+        Parser& operator=(const Parser& other) noexcept // Why noexcept? Because all operations here are noexcept. 
+        {
+            if (this != &other)
+            {   
+                // Streams are not copyable, but they are movable, make this implementation explocitly do moving of ownership of stream.
+                // ...............................................----------------------------------------------------------------------
+
+                // Transfers ownership of the file stream from the source object to the destination object.
+                // This is a noexcept operation because it only involves moving member variables and does not throw exceptions.             
+                _ifile_name = std::move(other._ifile_name);              
+                _ifile = std::move(other._ifile);
+
+                _is_open = other._is_open;
+                bucket_count = other.bucket_count;
+                bucket_used = other.bucket_used;
+                mxntpl = other.mxntpl;
+                mnntpl = other.mnntpl;
+                nol = other.nol;
+                tnt = other.tnt;
+            }
+
+            return *this;
+        }
+         */
+        
+        // Move Assignment Operator, Just for documentation purposes (Don't use it) default works fine.
+        /*
+        Parser& operator=(Parser&& other) noexcept // Why noexcept? Because all operations here are noexcept.
+        {
+            if (this != &other)
+            {                                              
+                // Streams are movable.
+                // This is what std::move does (Move Constructor / Move Assignment Operator):
+                // - The contents of 'other' are moved into 'this'.
+                // - 'other' is left in a valid but unspecified state (usually empty or zero-initialized).    
+                _ifile_name = std::move(other._ifile_name);
+                _ifile = std::move(other._ifile);
+
+                _is_open = _ifile.is_open();
+                bucket_count = other.bucket_count;
+                bucket_used = other.bucket_used;
+                mxntpl = other.mxntpl;
+                mnntpl = other.mnntpl;
+                nol = other.nol;
+                tnt = other.tnt;
+
+                other._is_open = false;
+            }
+
+            return *this;
+        }
+         */
 
         void reset(void)
         {
@@ -335,20 +402,9 @@ class Parser
                 _is_open = false;
             }
         }
-    
-        /*
-            Move constructor: Transfers ownership of the file stream from the
-            source object to the destination object. The source object is left
-            in a valid but unspecified state (specifically, its _is_open flag is
-            set to false and its stream is left in a state where it no longer
-            owns the file). This is a noexcept operation because it only involves
-            moving member variables and does not throw exceptions.
-        */
-        Parser(Parser&& other) noexcept = default;
- 
+     
         // Destructor – file closed automatically
         ~Parser() = default;
-
 
         /*
         // It is there just for debugging purposes. It should be removed
@@ -1064,6 +1120,11 @@ class Parser
                         throw std::runtime_error(std::string("Parser::save_lines_table(const Parser&, const WORDS* const* const, const std::string&) Error: failed to write key at lines_array[") + std::to_string(i) + "][" + std::to_string(j) + "]");
                     }
                 }
+
+                if (i % CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL == 0)
+                {
+                    std::cout<< ".";
+                }
             }
 
             ofile.flush();
@@ -1284,6 +1345,11 @@ class Parser
                 }
 
                 i++;
+
+                if (i % CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL == 0)
+                {
+                    std::cout<< ".";
+                }
             }
 
             // Move to the top of the file
@@ -1826,9 +1892,13 @@ class Parser
 
                 if (nol % CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL == 0)
                 {
-                    std::cout<< "Rached line " << nol << std::endl;
+                    std::cout<< ".";
                 }
             }
+            
+//#ifdef CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL
+//            std::cout<< " nol = " << nol;
+//#endif
                         
             // Go to the top of the file
             reset();

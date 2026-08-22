@@ -904,6 +904,11 @@ class Parser
                         throw std::runtime_error("Parser::load_hash_table(const std::string ifile_name) Error: allocation failed for word record");
                     }
                 }
+
+                if (i % CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL == 0)
+                {
+                    std::cout<< ".";
+                }
             }
                 
             return header;
@@ -1222,6 +1227,11 @@ class Parser
                 }
 
                 *(*lines_array + i) = line;
+
+                if (i % CORPUS_SERIALIZATION_CHECKPOINT_INTERVAL == 0)
+                {
+                    std::cout<< ".";
+                }
             }
 
             ifile.close();

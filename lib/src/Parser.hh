@@ -285,7 +285,9 @@ class Parser
 
         explicit Parser(const std::string& iname/*, const std::string& oname*/) : _ifile_name(iname), _ifile(), _is_open(false), bucket_count(0), bucket_used(0), mxntpl(0), mnntpl(std::numeric_limits<size_t>::max()), nol(0), tnt(0) /*, bucket_count(size_t(KEYS_COMMON_STARTING_SIZE)), buckets_used(0),*/ /*hash_table(nullptr), index_table(nullptr), line_number(0), token_number(0)*/
         {
-            _ifile.open(_ifile_name);
+            // To prevent early EOF due to some character read as a control character if file was rea in text mode
+            // It happened as UTF-8 bytes for some non-latin characters e.g. \x9f, \x1A were read as control characters
+            _ifile.open(_ifile_name, std::ios::binary);
 
             if (_ifile.is_open())
             {
